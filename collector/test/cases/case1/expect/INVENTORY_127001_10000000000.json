@@ -1,0 +1,37 @@
+[
+  {
+    "PRODUCT_ID":1,
+    "NAME":"test name1",
+    "QUANTITY":50,
+    "PRICE":10.2,
+    "UPDATED": "2022-03-13 00:00:00+00:00"
+  },
+  {
+    "PRODUCT_ID":2,
+    "NAME":"test name2",
+    "QUANTITY":15,
+    "PRICE":7.651,
+    "UPDATED": "2022-03-11 00:00:00+00:00"
+  },
+  {
+    "PRODUCT_ID":2,
+    "NAME":"test name3",
+    "QUANTITY":16,
+    "PRICE":17.651,
+    "UPDATED": "2022-03-11 00:00:00+00:00"
+  },
+  {
+    "PRODUCT_ID":1,
+    "NAME":"test name1",
+    "QUANTITY":68,
+    "PRICE":35.665,
+    "UPDATED": "2022-03-12 00:00:00+00:00"
+  },
+  {
+    "PRODUCT_ID":5,
+    "NAME":"test name5",
+    "QUANTITY":55,
+    "PRICE":55.665,
+    "UPDATED": "2022-03-12 00:00:00+00:00"
+  }
+]

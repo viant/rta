@@ -1,0 +1,6 @@
+Dest: INVENTORY
+JournalTable: RTA_JN
+UseInsertAPI: true
+Connection:
+  Driver: sqlite3
+  Dsn: test/mydb_l.db

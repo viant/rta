@@ -1,0 +1,16 @@
+Dest: INVENTORY
+JournalTable: RTA_JN
+UseInsertAPI: true
+Merge:
+  UniqueKeys:
+    - PRODUCT_ID
+    - NAME
+  AggregableSum:
+    - QUANTITY
+    - PRICE
+  AggregableMax:
+    - UPDATED
+  Others:
+Connection:
+  Driver: sqlite3
+  Dsn: test/mydb_m.db

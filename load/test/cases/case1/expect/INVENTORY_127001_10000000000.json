@@ -1,0 +1,23 @@
+[
+  {
+    "PRODUCT_ID":1,
+    "NAME":"name1",
+    "QUANTITY":2,
+    "PRICE":0.55,
+    "UPDATED": "2022-03-05 00:00:00+00:00"
+  },
+  {
+    "PRODUCT_ID":1,
+    "NAME":"name1",
+    "QUANTITY":3,
+    "PRICE":0.65,
+    "UPDATED": "2022-03-05 00:00:00+00:00"
+  },
+  {
+    "PRODUCT_ID":2,
+    "NAME":"name2",
+    "QUANTITY":15,
+    "PRICE":7.651,
+    "UPDATED": "2022-03-05 00:00:00+00:00"
+  }
+]

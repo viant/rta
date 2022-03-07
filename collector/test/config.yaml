@@ -1,0 +1,18 @@
+MaxMessageSize: 16
+Concurrency: 10
+Batch:
+  MaxElements: 3
+  MaxDuration: 200000000
+Retry:
+  EveryInSec: 1
+  Max: 3
+Stream:
+    URL: /tmp/inventory/inventory.log
+    FlushMod: 1
+Loader:
+  Dest: INVENTORY
+  JournalTable: RTA_JN
+  UseInsertAPI: true
+  Connection:
+    Driver: sqlite3
+    Dsn: test/mydb_c.db

@@ -1,0 +1,7 @@
+datastore: db
+config:
+  driverName: sqlite3
+  descriptor: test/mydb_l.db
+recreate: true
+scripts:
+  - URL: test/schema.sql
