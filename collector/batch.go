@@ -24,7 +24,7 @@ type Batch struct {
 }
 
 func (b Batch) IsActive(batch *config.Batch) bool {
-	return toolbox.AsInt(len(b.Accumulator)) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration
+	return toolbox.AsInt(len(b.Accumulator)) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration()
 
 }
 

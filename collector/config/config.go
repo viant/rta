@@ -28,8 +28,18 @@ type Retry struct {
 }
 
 type Batch struct {
-	MaxElements int
-	MaxDuration time.Duration
+	MaxElements   int
+	maxDuration   time.Duration
+	MaxDurationMs int
+}
+
+func (b *Batch) MaxDuration() time.Duration {
+	if b.maxDuration != 0 {
+		return b.maxDuration
+	}
+	b.maxDuration = time.Millisecond * time.Duration(b.MaxDurationMs)
+	return b.maxDuration
+
 }
 
 func (c *Config) Validate() error {
@@ -60,8 +70,8 @@ func (c *Config) Validate() error {
 	if c.Batch == nil {
 		return errors.Errorf("Batch was empty")
 	}
-	if c.Batch.MaxDuration <= 0 {
-		return errors.Errorf("Batch MaxDuration was 0")
+	if c.Batch.MaxDurationMs <= 0 {
+		return errors.Errorf("Batch MaxDurationMs was 0")
 	}
 	if c.Batch.MaxElements <= 0 {
 		return errors.Errorf("Batch MaxElements was 0")

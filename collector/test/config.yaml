@@ -2,7 +2,7 @@ MaxMessageSize: 16
 Concurrency: 10
 Batch:
   MaxElements: 3
-  MaxDuration: 200000000
+  MaxDurationMs: 1000
 Retry:
   EveryInSec: 1
   Max: 3
