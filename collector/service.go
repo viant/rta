@@ -21,7 +21,7 @@ import (
 type Service struct {
 	config      *config.Config
 	fs          afs.Service
-	newRecord   func(record interface{}) interface{}
+	newRecord   func() interface{}
 	keyFn       func(record interface{}) interface{}
 	reducerFn   func(accumulator, source interface{})
 	mapperFn    func(map[interface{}]interface{}) interface{}
@@ -163,15 +163,10 @@ func (s *Service) reduce(acc map[interface{}]interface{}, record interface{}) {
 	key := s.keyFn(record)
 	accumulator, ok := acc[key]
 	if !ok {
-		accumulator = s.newRecord(record)
-		if accumulator == nil {
-			fmt.Errorf("fail to cast record")
-			return
-		}
+		accumulator = s.newRecord()
 		acc[key] = accumulator
-	} else {
-		s.reducerFn(accumulator, record)
 	}
+	s.reducerFn(accumulator, record)
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
@@ -199,7 +194,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
-		record := s.newRecord(nil)
+		record := s.newRecord()
 		if _, ok := record.(gojay.UnmarshalerJSONObject); ok {
 			err = gojay.Unmarshal(data, record)
 		} else {
@@ -223,7 +218,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 }
 
 func New(config *config.Config,
-	newRecord func(record interface{}) interface{},
+	newRecord func() interface{},
 	key func(record interface{}) interface{},
 	reducer func(accumulator, source interface{}),
 	mapper func(map[interface{}]interface{}) interface{},

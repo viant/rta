@@ -160,8 +160,13 @@ func reducerFn(accumulator, source interface{}) {
 	src := source.(*Inventory)
 	acc.Price += src.Price
 	acc.Quantity += src.Quantity
-	if src.Updated.UnixMilli() > acc.Updated.UnixMilli() {
+
+	if acc.Updated == nil {
 		acc.Updated = src.Updated
+	} else {
+		if src.Updated.UnixMilli() > acc.Updated.UnixMilli() {
+			acc.Updated = src.Updated
+		}
 	}
 
 	if acc.Name == "" {
@@ -188,22 +193,8 @@ func keyFn(record interface{}) interface{} {
 	builder.WriteString(toolbox.AsString(src.ProductID) + "." + src.Name)
 	return builder.String()
 }
-func newRecordFn(record interface{}) interface{} {
-	if record == nil {
-		return &Inventory{}
-	}
-	inventory, casted := record.(*Inventory)
-	if casted {
-		return &Inventory{
-			ProductID: inventory.ProductID,
-			Name:      inventory.Name,
-			Price:     inventory.Price,
-			Quantity:  inventory.Quantity,
-			Updated:   inventory.Updated,
-		}
-	}
-	return nil
-
+func newRecordFn() interface{} {
+	return &Inventory{}
 }
 
 type Inventory struct {
