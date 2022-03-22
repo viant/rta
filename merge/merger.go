@@ -40,7 +40,8 @@ func (s *Service) Merge(ctx context.Context) error {
 	if product == nil {
 		product = &ansi.ANSI
 	}
-	for _, jn := range journals {
+	for i := range journals {
+		jn := journals[i]
 		tx, err := db.Begin()
 		if err != nil {
 			return err

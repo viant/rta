@@ -66,7 +66,8 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]stri
 	}
 	toProcess := make(map[string]bool)
 	pending := make(map[string]bool)
-	for _, candidate := range objects {
+	for i := range objects {
+		candidate := objects[i]
 		if candidate.IsDir() {
 			continue
 		}
