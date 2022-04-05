@@ -8,6 +8,7 @@ import (
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +16,23 @@ type Config struct {
 	JournalTable string             `yaml:"JournalTable"`
 	Merge        *Merge             `yaml:"Merge"`
 	Connection   *config.Connection `yaml:"Connection"`
+	TimeoutSec int
+	ThinkTimeSec int
+}
+
+func (c *Config) Timeout() time.Duration {
+	if c.TimeoutSec == 0 {
+		c.TimeoutSec = 500
+	}
+	return time.Second * time.Duration(c.TimeoutSec)
+}
+
+
+func (c *Config) ThinkTime() time.Duration {
+	if c.ThinkTimeSec == 0 {
+		c.ThinkTimeSec = 1
+	}
+	return time.Second * time.Duration(c.ThinkTimeSec)
 }
 
 type Merge struct {

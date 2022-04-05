@@ -15,6 +15,7 @@ import (
 	"github.com/viant/sqlx/metadata/product/ansi"
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/metadata/registry"
+	"log"
 	"strings"
 	"time"
 )
@@ -22,6 +23,26 @@ import (
 type Service struct {
 	config *config.Config
 }
+
+func (s *Service) MergeInBackground() {
+	timeout := s.config.Timeout()
+
+	for ;; {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		startTime := time.Now()
+		err := s.Merge(ctx)
+		if err != nil {
+			log.Panicf("failed to merge: %v", err)
+		}
+		elapsed := time.Now().Sub(startTime)
+		thinkTime := s.config.ThinkTime()-elapsed
+		if thinkTime > 0 {
+			time.Sleep(thinkTime)
+		}
+		cancel()
+	}
+}
+
 
 func (s *Service) Merge(ctx context.Context) error {
 	db, err := s.config.Connection.OpenDB(ctx)
