@@ -14,6 +14,7 @@ import (
 	"github.com/viant/tapper/io"
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/msg"
+	"log"
 	"strings"
 	"sync"
 )
@@ -99,7 +100,11 @@ func (s *Service) getBatch() (*Batch, error) {
 		if batch.IsActive(s.config.Batch) {
 			return batch, nil
 		}
-		go s.FlushInBackground(batch)
+		go func() {
+			if err := s.FlushInBackground(batch); err != nil {
+				log.Println(err)
+			}
+		}()
 	}
 	batch, err := NewBatch(s.config.Stream, s.fs)
 	if err != nil {
