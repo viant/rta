@@ -27,7 +27,7 @@ type Service struct {
 func (s *Service) MergeInBackground() {
 	timeout := s.config.Timeout()
 
-	for ;; {
+	for {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		startTime := time.Now()
 		err := s.Merge(ctx)
@@ -35,14 +35,13 @@ func (s *Service) MergeInBackground() {
 			log.Panicf("failed to merge: %v", err)
 		}
 		elapsed := time.Now().Sub(startTime)
-		thinkTime := s.config.ThinkTime()-elapsed
+		thinkTime := s.config.ThinkTime() - elapsed
 		if thinkTime > 0 {
 			time.Sleep(thinkTime)
 		}
 		cancel()
 	}
 }
-
 
 func (s *Service) Merge(ctx context.Context) error {
 	db, err := s.config.Connection.OpenDB(ctx)
@@ -185,7 +184,7 @@ func insertOrReplaceDDL(source string, dest string, columns string, aggregableSu
 		}
 	}
 
-	insertDDL := fmt.Sprintf("INSERT  INTO %v (%v) SELECT %v FROM %v s WHERE NOT EXISTS (SELECT 1 FROM INVENTORY  WHERE  %v)", dest, columns, columns, source, uniqueKeysCondition)
+	insertDDL := fmt.Sprintf("INSERT  INTO %v (%v) SELECT %v FROM %v s WHERE NOT EXISTS (SELECT 1 FROM %v  WHERE  %v)", dest, columns, columns, source, dest, uniqueKeysCondition)
 	updateDDL := ""
 	if aggregableSums != "" || aggregableMaxs != "" {
 
