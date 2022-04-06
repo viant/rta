@@ -32,7 +32,7 @@ func (s *Service) MergeInBackground() {
 		startTime := time.Now()
 		err := s.Merge(ctx)
 		if err != nil {
-			log.Panicf("failed to merge: %v", err)
+			log.Printf("failed to merge: %v", err)
 		}
 		elapsed := time.Now().Sub(startTime)
 		thinkTime := s.config.ThinkTime() - elapsed
@@ -94,11 +94,14 @@ func (s *Service) mergeToDestTable(ctx context.Context, jn *domain.Journal, tx *
 	if updateSQL != "" {
 		_, err := tx.ExecContext(ctx, updateSQL)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to update: %v, %w", updateSQL, err)
 		}
 	}
 
 	_, err := tx.ExecContext(ctx, insertSQL)
+	if err != nil {
+		return fmt.Errorf("failed to insert: %v, %w", insertSQL, err)
+	}
 	return err
 }
 
