@@ -148,7 +148,11 @@ func (s *Service) Close() error {
 	if batch == nil {
 		return nil
 	}
-	return s.FlushInBackground(batch)
+	err := s.FlushInBackground(batch)
+	if err != nil {
+		log.Println(err)
+	}
+	return err
 }
 
 func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error) {
