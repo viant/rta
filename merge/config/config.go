@@ -16,7 +16,8 @@ type Config struct {
 	JournalTable string             `yaml:"JournalTable"`
 	Merge        *Merge             `yaml:"Merge"`
 	Connection   *config.Connection `yaml:"Connection"`
-	TimeoutSec int
+
+	TimeoutSec   int
 	ThinkTimeSec int
 }
 
@@ -26,7 +27,6 @@ func (c *Config) Timeout() time.Duration {
 	}
 	return time.Second * time.Duration(c.TimeoutSec)
 }
-
 
 func (c *Config) ThinkTime() time.Duration {
 	if c.ThinkTimeSec == 0 {

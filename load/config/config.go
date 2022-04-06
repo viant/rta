@@ -12,10 +12,18 @@ import (
 
 type Config struct {
 	Dest         string             `yaml:"Dest"`
+	TransientDb  string             `yaml:"TransientDb"`
 	JournalTable string             `yaml:"JournalTable"`
 	Connection   *config.Connection `yaml:"Connection"`
 	UseInsertAPI bool
 	suffix       Suffix
+}
+
+func (c *Config) TransientTable() string {
+	if c.TransientDb == "" {
+		return c.Dest
+	}
+	return c.TransientDb + "." + c.Dest
 }
 
 func (c *Config) Suffix() Suffix {
