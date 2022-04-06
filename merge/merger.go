@@ -158,6 +158,7 @@ func (s *Service) SQL(source, dest string, product *database.Product) (string, s
 	}
 
 	productDialect := registry.LookupDialect(product)
+	fmt.Printf("using product: %+v upsert: %v\n", product, productDialect.Upsert)
 	switch productDialect.Upsert {
 	case dialect.UpsertTypeInsertOrUpdate:
 		{
