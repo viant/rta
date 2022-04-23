@@ -97,14 +97,10 @@ func (s *Service) getBatch() (*Batch, error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	if batch := s.batch; batch != nil {
-		if batch.IsActive(s.config.Batch) {
-			return batch, nil
+		b, err := s.flushIfNeed(batch)
+		if b != nil {
+			return b, err
 		}
-		go func() {
-			if err := s.FlushInBackground(batch); err != nil {
-				log.Println(err)
-			}
-		}()
 	}
 	batch, err := NewBatch(s.config.Stream, s.fs)
 	if err != nil {
@@ -112,6 +108,18 @@ func (s *Service) getBatch() (*Batch, error) {
 	}
 	s.batch = batch
 	return batch, nil
+}
+
+func (s *Service) flushIfNeed(batch *Batch) (*Batch, error) {
+	if batch.IsActive(s.config.Batch) {
+		return batch, nil
+	}
+	go func() {
+		if err := s.FlushInBackground(batch); err != nil {
+			log.Println(err)
+		}
+	}()
+	return nil, nil
 }
 
 func (s *Service) Collect(record interface{}) error {
@@ -137,7 +145,8 @@ func (s *Service) Collect(record interface{}) error {
 		return err
 	}
 	message.Free()
-	return nil
+	_, err = s.flushIfNeed(batch)
+	return err
 }
 
 func (s *Service) Close() error {
