@@ -178,10 +178,12 @@ func reducerFn(accumulator, source interface{}) {
 
 }
 
-func mapperFn(data map[interface{}]interface{}) interface{} {
-	var result = make([]*Inventory, len(data))
+func mapperFn(accumulator *Accumulator) interface{} {
+	var result = make([]*Inventory, accumulator.Len())
 	i := 0
-	for _, v := range data {
+	accumulator.Lock()
+	defer accumulator.Unlock()
+	for _, v := range accumulator.acc {
 		result[i] = v.(*Inventory)
 		i++
 	}

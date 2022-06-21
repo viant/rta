@@ -10,21 +10,53 @@ import (
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/tapper/log"
 	"github.com/viant/toolbox"
+	"sync"
 	"time"
 )
 
-type Batch struct {
-	ID string
-	*tconfig.Stream
-	Accumulator map[interface{}]interface{}
-	Started     time.Time
-	Count       int32
-	logger      *log.Logger
-	PendingURL  string
+type (
+	Batch struct {
+		ID string
+		*tconfig.Stream
+		Accumulator *Accumulator
+		Started     time.Time
+		Count       int32
+		logger      *log.Logger
+		PendingURL  string
+	}
+
+	Accumulator struct {
+		acc map[interface{}]interface{}
+		sync.RWMutex
+	}
+)
+
+func (a *Accumulator) Len() int {
+	a.RWMutex.RLock()
+	result := len(a.acc)
+	a.RWMutex.RUnlock()
+	return result
+}
+
+func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
+	a.RWMutex.RLock()
+	data, ok := a.acc[key]
+	a.RWMutex.RUnlock()
+	return data, ok
+}
+
+func (a *Accumulator) Put(key, value interface{}) {
+	a.RWMutex.Lock()
+	a.acc[key] = value
+	a.RWMutex.Unlock()
+}
+
+func NewAccumulator() *Accumulator {
+	return &Accumulator{acc: map[interface{}]interface{}{}}
 }
 
 func (b Batch) IsActive(batch *config.Batch) bool {
-	return toolbox.AsInt(len(b.Accumulator)) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration()
+	return toolbox.AsInt(b.Accumulator.Len()) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration()
 
 }
 
@@ -50,7 +82,7 @@ func NewBatch(stream *tconfig.Stream, fs afs.Service) (*Batch, error) {
 		PendingURL:  pendingURL,
 		ID:          UUID.String(),
 		Stream:      batchSteam,
-		Accumulator: make(map[interface{}]interface{}),
+		Accumulator: NewAccumulator(),
 		Started:     time.Now(),
 		Count:       0,
 		logger:      logger,

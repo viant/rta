@@ -12,8 +12,10 @@ import (
 	"github.com/viant/rta/collector/config"
 	"github.com/viant/rta/shared"
 	"github.com/viant/tapper/io"
+
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/msg"
+	tjson "github.com/viant/tapper/msg/json"
 	"log"
 	"strings"
 	"sync"
@@ -25,7 +27,7 @@ type Service struct {
 	newRecord   func() interface{}
 	keyFn       func(record interface{}) interface{}
 	reducerFn   func(accumulator, source interface{})
-	mapperFn    func(map[interface{}]interface{}) interface{}
+	mapperFn    func(acc *Accumulator) interface{}
 	loader      Loader
 	batch       *Batch
 	mux         sync.Mutex
@@ -178,12 +180,12 @@ func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error)
 	return encProvider, err
 }
 
-func (s *Service) reduce(acc map[interface{}]interface{}, record interface{}) {
+func (s *Service) reduce(acc *Accumulator, record interface{}) {
 	key := s.keyFn(record)
-	accumulator, ok := acc[key]
+	accumulator, ok := acc.Get(key)
 	if !ok {
 		accumulator = s.newRecord()
-		acc[key] = accumulator
+		acc.Put(key, accumulator)
 	}
 	s.reducerFn(accumulator, record)
 }
@@ -209,7 +211,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 	scanner := bufio.NewScanner(reader)
 	processed := 0
 	failed := 0
-	acc := map[interface{}]interface{}{}
+	acc := NewAccumulator()
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
@@ -239,8 +241,8 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 func New(config *config.Config,
 	newRecord func() interface{},
 	key func(record interface{}) interface{},
-	reducer func(accumulator, source interface{}),
-	mapper func(map[interface{}]interface{}) interface{},
+	reducer func(key, source interface{}),
+	mapper func(accumulator *Accumulator) interface{},
 	loader Loader) (*Service, error) {
 	srv := &Service{
 		config:    config,
@@ -250,7 +252,7 @@ func New(config *config.Config,
 		reducerFn: reducer,
 		mapperFn:  mapper,
 		loader:    loader,
-		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency),
+		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 	}
 	err := srv.RetryFailed(context.Background(), true)
 	return srv, err
