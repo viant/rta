@@ -183,7 +183,7 @@ func mapperFn(accumulator *Accumulator) interface{} {
 	i := 0
 	accumulator.Lock()
 	defer accumulator.Unlock()
-	for _, v := range accumulator.acc {
+	for _, v := range accumulator.Map {
 		result[i] = v.(*Inventory)
 		i++
 	}

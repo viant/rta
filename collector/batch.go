@@ -26,33 +26,33 @@ type (
 	}
 
 	Accumulator struct {
-		acc map[interface{}]interface{}
+		Map map[interface{}]interface{}
 		sync.RWMutex
 	}
 )
 
 func (a *Accumulator) Len() int {
 	a.RWMutex.RLock()
-	result := len(a.acc)
+	result := len(a.Map)
 	a.RWMutex.RUnlock()
 	return result
 }
 
 func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 	a.RWMutex.RLock()
-	data, ok := a.acc[key]
+	data, ok := a.Map[key]
 	a.RWMutex.RUnlock()
 	return data, ok
 }
 
 func (a *Accumulator) Put(key, value interface{}) {
 	a.RWMutex.Lock()
-	a.acc[key] = value
+	a.Map[key] = value
 	a.RWMutex.Unlock()
 }
 
 func NewAccumulator() *Accumulator {
-	return &Accumulator{acc: map[interface{}]interface{}{}}
+	return &Accumulator{Map: map[interface{}]interface{}{}}
 }
 
 func (b Batch) IsActive(batch *config.Batch) bool {
