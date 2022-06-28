@@ -12,6 +12,8 @@ import (
 	"github.com/viant/rta/collector/config"
 	"github.com/viant/rta/shared"
 	"github.com/viant/tapper/io"
+	"sync/atomic"
+	"time"
 
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/msg"
@@ -33,6 +35,26 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
+	counter uint32
+}
+
+func (s *Service) watchInBackground() {
+	sleepTime := time.Second
+	if s.config.Batch != nil {
+		sleepTime = s.config.Batch.MaxDuration()
+	}
+	for {
+		if atomic.LoadUint32(&s.counter) == 0 {
+			time.Sleep(sleepTime)
+			continue
+		}
+		atomic.StoreUint32(&s.counter, 0)
+		_, err := s.getBatch()
+		if err != nil {
+			log.Println(err)
+		}
+		time.Sleep(sleepTime)
+	}
 }
 
 func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
@@ -148,6 +170,7 @@ func (s *Service) Collect(record interface{}) error {
 	}
 	message.Free()
 	_, err = s.flushIfNeed(batch)
+	atomic.AddUint32(&s.counter, 1)
 	return err
 }
 
@@ -255,5 +278,8 @@ func New(config *config.Config,
 		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 	}
 	err := srv.RetryFailed(context.Background(), true)
+	if err == nil {
+		go srv.watchInBackground()
+	}
 	return srv, err
 }
