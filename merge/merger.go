@@ -260,7 +260,7 @@ func insertOrUpdateDDL(source string, dest string, columns string, aggregableSum
 }
 
 const (
-	metricURI = "/v1/api/metric"
+	metricURI = "/v1/api/metric/"
 )
 
 func (s *Service) startEndpoint() {
