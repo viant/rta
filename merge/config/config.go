@@ -11,15 +11,21 @@ import (
 	"time"
 )
 
-type Config struct {
-	Dest         string             `yaml:"Dest"`
-	JournalTable string             `yaml:"JournalTable"`
-	Merge        *Merge             `yaml:"Merge"`
-	Connection   *config.Connection `yaml:"Connection"`
+type (
+	Config struct {
+		Dest         string             `yaml:"Dest"`
+		JournalTable string             `yaml:"JournalTable"`
+		Merge        *Merge             `yaml:"Merge"`
+		Connection   *config.Connection `yaml:"Connection"`
+		TimeoutSec   int
+		ThinkTimeSec int
+		Endpoint     *Endpoint
+	}
 
-	TimeoutSec   int
-	ThinkTimeSec int
-}
+	Endpoint struct {
+		Port int
+	}
+)
 
 func (c *Config) Timeout() time.Duration {
 	if c.TimeoutSec == 0 {

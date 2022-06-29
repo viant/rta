@@ -4,8 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/viant/gmetric"
+	"github.com/viant/gmetric/provider"
+	"github.com/viant/gmetric/stat"
 	"github.com/viant/rta/domain"
 	"github.com/viant/rta/merge/config"
+	"github.com/viant/rta/merge/handler"
 	"github.com/viant/rta/shared"
 	"github.com/viant/sqlx/io/read"
 	"github.com/viant/sqlx/io/update"
@@ -16,12 +20,18 @@ import (
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/metadata/registry"
 	"log"
+	"net/http"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Service struct {
-	config *config.Config
+	config  *config.Config
+	metrics *gmetric.Service
+	counter *gmetric.Operation
+	journal *gmetric.Operation
 }
 
 func (s *Service) MergeInBackground() {
@@ -44,14 +54,21 @@ func (s *Service) MergeInBackground() {
 }
 
 func (s *Service) Merge(ctx context.Context) error {
+	stats := stat.New()
+	onDone := s.counter.Begin(time.Now())
+	defer func() {
+		onDone(time.Now(), stats)
+	}()
 	db, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
+		stats.Append(err)
 		return err
 	}
 	defer db.Close()
 
 	journals, err := s.readFromJournalTable(ctx, db)
 	if err != nil {
+		stats.Append(err)
 		return err
 	}
 	metaService := metadata.New()
@@ -60,30 +77,46 @@ func (s *Service) Merge(ctx context.Context) error {
 	if product == nil {
 		product = &ansi.ANSI
 	}
-	for i := range journals {
-		jn := journals[i]
-		tx, err := db.Begin()
-		if err != nil {
-			return err
+	for _, journal := range journals {
+		if err = s.processJournal(ctx, journal, db, product); err != nil {
+			stats.Append(err)
 		}
-		if err = s.mergeToDestTable(ctx, jn, tx, product); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
+		continue
+	}
+	return nil
+}
 
-		if err = s.updateJournal(ctx, db, jn, tx); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
+func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sql.DB, product *database.Product) error {
+	stats := stat.New()
+	onDone := s.journal.Begin(time.Now())
+	defer func() {
+		onDone(time.Now(), stats)
+	}()
+	tx, err := db.Begin()
+	if err != nil {
+		stats.Append(err)
+		return err
+	}
+	if err = s.mergeToDestTable(ctx, jn, tx, product); err != nil {
+		_ = tx.Rollback()
+		stats.Append(err)
+		return err
+	}
 
-		if err = tx.Commit(); err != nil {
-			return err
-		}
+	if err = s.updateJournal(ctx, db, jn, tx); err != nil {
+		_ = tx.Rollback()
+		stats.Append(err)
+		return err
+	}
 
-		if _, err = db.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
-			return err
-		}
+	if err = tx.Commit(); err != nil {
+		stats.Append(err)
+		return err
+	}
 
+	if _, err = db.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
+		stats.Append(err)
+		return err
 	}
 	return nil
 }
@@ -97,7 +130,6 @@ func (s *Service) mergeToDestTable(ctx context.Context, jn *domain.Journal, tx *
 			return fmt.Errorf("failed to update: %v, %w", updateSQL, err)
 		}
 	}
-
 	_, err := tx.ExecContext(ctx, insertSQL)
 	if err != nil {
 		return fmt.Errorf("failed to insert: %v, %w", insertSQL, err)
@@ -227,7 +259,28 @@ func insertOrUpdateDDL(source string, dest string, columns string, aggregableSum
 	return updateDDL
 }
 
+const (
+	metricURI = "/v1/api/metrics"
+)
+
+func (s *Service) startEndpoint() {
+	if s.config.Endpoint == nil {
+		return
+	}
+	metricHandler := gmetric.NewHandler(metricURI, s.metrics)
+	http.Handle(metricURI, metricHandler)
+	http.Handle(handler.ConfigURI, handler.NewHandler(s.config))
+	http.HandleFunc(handler.StatusURI, handler.StatusOK)
+	err := http.ListenAndServe(":"+strconv.Itoa(s.config.Endpoint.Port), http.DefaultServeMux)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func New(c *config.Config) (*Service, error) {
-	srv := &Service{config: c}
+	srv := &Service{config: c, metrics: gmetric.New()}
+	srv.counter = srv.metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "merge", "merge operation", time.Microsecond, time.Minute, 2, provider.NewBasic())
+	srv.journal = srv.metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "journal", "journal merge operation", time.Microsecond, time.Minute, 2, provider.NewBasic())
+	go srv.startEndpoint()
 	return srv, nil
 }
