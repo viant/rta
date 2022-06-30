@@ -9,5 +9,5 @@ import (
 type Suffix func() string
 
 func TimeBasedSuffix() string {
-	return strconv.FormatInt(time.Now().Sub(time.UnixMilli(shared.StartTime)).Milliseconds(), 10)
+	return strconv.FormatInt(time.Now().Sub(time.UnixMilli(shared.StartTime)).Microseconds(), 10)
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/viant/sqlx/io/read"
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/option"
-	"os"
 	"strings"
 	"time"
 )
@@ -130,16 +129,10 @@ func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable str
 }
 
 func (s *Service) init() error {
-	hostname, err := os.Hostname()
+	var err error
+	s.hostIP, err = shared.GetLocalIPv4()
 	if err != nil {
 		return err
-	}
-	s.hostIP, err = shared.GetHostIPv4(hostname)
-	if err != nil && strings.Contains(err.Error(), "no such host") {
-		s.hostIP, err = shared.GetHostIPv4("localhost")
-		if err != nil {
-			return err
-		}
 	}
 	if s.hostIP == "::1" {
 		s.hostIP = "127.0.0.1"
