@@ -31,6 +31,9 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string) er
 	}
 	defer db.Close()
 	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
 	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, tx, batchID)
 	if err != nil {
 		_ = tx.Rollback()
