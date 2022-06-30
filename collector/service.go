@@ -247,8 +247,6 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	err := s.loader.Load(context.Background(), data, batch.ID)
 	if err != nil {
 		stats.Append(err)
-	}
-	if err != nil {
 		return err
 	}
 	if err = s.fs.Delete(context.Background(), batch.PendingURL); err != nil {

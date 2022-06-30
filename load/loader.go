@@ -44,10 +44,10 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string) er
 	err = s.insertToJournal(ctx, db, tempTable, tx, batchID)
 	if err != nil {
 		_ = tx.Rollback()
-		return err
+		return fmt.Errorf("failed to insert into journal table: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return err
+		return fmt.Errorf("failed to commit - load/insert into journal table: %w", err)
 	}
 	return nil
 }
@@ -56,7 +56,7 @@ type Exist struct {
 	X int
 }
 
-func (s *Service) checkRecordExist(ctx context.Context, db *sql.DB, batchID string) (bool, error) {
+func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, batchID string) (bool, error) {
 	querySQL := fmt.Sprintf("SELECT 1 AS X  FROM %v WHERE BATCH_ID ='%v' AND IP ='%v'", s.config.JournalTable, batchID, s.hostIP)
 	reader, err := read.New(ctx, db, querySQL, func() interface{} { return &Exist{} })
 	if err != nil {
@@ -71,7 +71,7 @@ func (s *Service) checkRecordExist(ctx context.Context, db *sql.DB, batchID stri
 }
 
 func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, tx *sql.Tx, batchID string) (bool, string, error) {
-	exist, err := s.checkRecordExist(ctx, db, batchID)
+	exist, err := s.checkRecordExistInJounral(ctx, db, batchID)
 	if err != nil {
 		return false, "", err
 	}
@@ -80,14 +80,20 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	}
 	sourceTable := s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
 	DDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v AS SELECT * FROM %v WHERE 1=0", sourceTable, s.config.Dest)
-	if _, err := db.Exec(DDL); err != nil {
+	if _, err := tx.Exec(DDL); err != nil {
 		return false, "", err
+	}
+	if _, err = tx.Exec("TRUNCATE TABLE " + sourceTable); err != nil {
+		return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
 	}
 	loadFn, err := s.loadFn(ctx, db, sourceTable)
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
 	}
 	_, err = loadFn(ctx, data, tx)
+	if err != nil {
+		err = fmt.Errorf("failed to load data into %v, %w", sourceTable, err)
+	}
 	return false, sourceTable, err
 }
 
@@ -95,7 +101,7 @@ func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (L
 	if s.config.UseInsertAPI {
 		srv, err := insert.New(ctx, db, sourceTable)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create insert service: %w", err)
 		}
 		return func(ctx context.Context, any interface{}, options ...option.Option) (int, error) {
 			affected, _, err := srv.Exec(ctx, any, options...)
@@ -104,7 +110,7 @@ func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (L
 	}
 	srv, err := load.New(ctx, db, sourceTable)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create load service: %w", err)
 	}
 	return srv.Exec, nil
 }
