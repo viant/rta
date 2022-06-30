@@ -23,6 +23,8 @@ type (
 		Count       int32
 		logger      *log.Logger
 		PendingURL  string
+		sync.Mutex
+		flushed uint32
 	}
 
 	Accumulator struct {

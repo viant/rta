@@ -225,6 +225,14 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
+	batch.Mutex.Lock()
+	defer func() {
+		batch.Mutex.Unlock()
+	}()
+	if atomic.LoadUint32(&batch.flushed) == 1 {
+		return nil
+	}
+
 	stats := stat.New()
 	if s.flushCounter != nil {
 		onDone := s.flushCounter.Begin(time.Now())
@@ -248,6 +256,9 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 	if err = s.fs.Delete(context.Background(), batch.Stream.URL); err != nil {
 		stats.Append(err)
+	}
+	if err == nil {
+		atomic.StoreUint32(&batch.flushed, 1)
 	}
 	return err
 }
