@@ -14,6 +14,7 @@ import (
 )
 
 type Config struct {
+	ID             string
 	Loader         *config.Config
 	Stream         *tconfig.Stream
 	MaxMessageSize int

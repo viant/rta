@@ -9,9 +9,13 @@ import (
 	"github.com/viant/afs"
 	"github.com/viant/afs/file"
 	"github.com/viant/afs/url"
+	"github.com/viant/gmetric"
+	"github.com/viant/gmetric/provider"
+	"github.com/viant/gmetric/stat"
 	"github.com/viant/rta/collector/config"
 	"github.com/viant/rta/shared"
 	"github.com/viant/tapper/io"
+	"reflect"
 	"sync/atomic"
 	"time"
 
@@ -35,7 +39,10 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	counter uint32
+	flushCounter *gmetric.Operation
+	retryCounter *gmetric.Operation
+
+	sequence uint32
 }
 
 func (s *Service) watchInBackground() {
@@ -44,11 +51,11 @@ func (s *Service) watchInBackground() {
 		sleepTime = s.config.Batch.MaxDuration()
 	}
 	for {
-		if atomic.LoadUint32(&s.counter) == 0 {
+		if atomic.LoadUint32(&s.sequence) == 0 {
 			time.Sleep(sleepTime)
 			continue
 		}
-		atomic.StoreUint32(&s.counter, 0)
+		atomic.StoreUint32(&s.sequence, 0)
 		_, err := s.getBatch()
 		if err != nil {
 			log.Println(err)
@@ -59,7 +66,21 @@ func (s *Service) watchInBackground() {
 
 func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 	toRetry, err := s.loadFailedBatches(ctx, onStartUp)
-	if err != nil || len(toRetry) == 0 {
+	if len(toRetry) == 0 {
+		return err
+	}
+	stats := stat.New()
+	if s.retryCounter != nil {
+		onDone := s.retryCounter.Begin(time.Now())
+		s.retryCounter.IncrementValue(stat.Pending)
+		defer func() {
+			onDone(time.Now(), stats)
+			s.retryCounter.DecrementValue(stat.Pending)
+		}()
+	}
+
+	if err != nil {
+		stats.Append(err)
 		return err
 	}
 	errors := shared.Errors{}
@@ -73,6 +94,7 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 			defer wg.Done()
 			rateLimiter <- true
 			if err := s.replayBatch(ctx, URL); err != nil {
+				stats.Append(err)
 				errors.Add(err)
 			}
 			<-rateLimiter
@@ -170,7 +192,7 @@ func (s *Service) Collect(record interface{}) error {
 	}
 	message.Free()
 	_, err = s.flushIfNeed(batch)
-	atomic.AddUint32(&s.counter, 1)
+	atomic.AddUint32(&s.sequence, 1)
 	return err
 }
 
@@ -214,14 +236,30 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
+	stats := stat.New()
+	if s.retryCounter != nil {
+		onDone := s.flushCounter.Begin(time.Now())
+		s.flushCounter.IncrementValue(stat.Pending)
+		defer func() {
+			onDone(time.Now(), stats)
+			s.flushCounter.DecrementValue(stat.Pending)
+		}()
+	}
 	batch.logger.Close()
 	data := s.mapperFn(batch.Accumulator)
 	err := s.loader.Load(context.Background(), data, batch.ID)
-	_ = s.fs.Delete(context.Background(), batch.PendingURL)
+	if err != nil {
+		stats.Append(err)
+	}
 	if err != nil {
 		return err
 	}
-	err = s.fs.Delete(context.Background(), batch.Stream.URL)
+	if err = s.fs.Delete(context.Background(), batch.PendingURL); err != nil {
+		stats.Append(err)
+	}
+	if err = s.fs.Delete(context.Background(), batch.Stream.URL); err != nil {
+		stats.Append(err)
+	}
 	return err
 }
 
@@ -266,7 +304,7 @@ func New(config *config.Config,
 	key func(record interface{}) interface{},
 	reducer func(key, source interface{}),
 	mapper func(accumulator *Accumulator) interface{},
-	loader Loader) (*Service, error) {
+	loader Loader, metrics *gmetric.Service) (*Service, error) {
 	srv := &Service{
 		config:    config,
 		fs:        afs.New(),
@@ -277,6 +315,12 @@ func New(config *config.Config,
 		loader:    loader,
 		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 	}
+
+	if metrics != nil {
+		srv.flushCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), config.ID+"Flush", "flush metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
+		srv.retryCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), config.ID+"Retry", "retry metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
+	}
+
 	err := srv.RetryFailed(context.Background(), true)
 	if err == nil {
 		go srv.watchInBackground()

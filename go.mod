@@ -11,7 +11,8 @@ require (
 	github.com/stretchr/testify v1.7.5
 	github.com/viant/afs v1.16.1-0.20220601210902-dc23d64dda15
 	github.com/viant/dsunit v0.10.10
-	github.com/viant/scy v0.1.1-0.20220621194552-77f597f309f7
+	github.com/viant/gmetric v0.2.7-0.20220509165352-32e81d5e5fd8
+	github.com/viant/scy v0.1.1-0.20220629173947-775b550f1578
 	github.com/viant/sqlx v0.0.0-20220628125203-98c9336edb63
 	github.com/viant/tapper v0.6.4-0.20220622150849-b84262d38655
 	github.com/viant/toolbox v0.34.5

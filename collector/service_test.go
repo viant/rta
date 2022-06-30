@@ -75,7 +75,7 @@ func TestService_Collect(t *testing.T) {
 	fs.Create(context.Background(), parent, file.DefaultDirOsMode, true)
 
 	for _, testCase := range testCases {
-		service, err := New(cfg, newRecordFn, keyFn, reducerFn, mapperFn, load)
+		service, err := New(cfg, newRecordFn, keyFn, reducerFn, mapperFn, load, nil)
 		if err != nil {
 			continue
 		}
