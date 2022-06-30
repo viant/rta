@@ -69,18 +69,8 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 	if len(toRetry) == 0 {
 		return err
 	}
-	stats := stat.New()
-	if s.retryCounter != nil {
-		onDone := s.retryCounter.Begin(time.Now())
-		s.retryCounter.IncrementValue(stat.Pending)
-		defer func() {
-			onDone(time.Now(), stats)
-			s.retryCounter.DecrementValue(stat.Pending)
-		}()
-	}
 
 	if err != nil {
-		stats.Append(err)
 		return err
 	}
 	errors := shared.Errors{}
@@ -94,7 +84,6 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 			defer wg.Done()
 			rateLimiter <- true
 			if err := s.replayBatch(ctx, URL); err != nil {
-				stats.Append(err)
 				errors.Add(err)
 			}
 			<-rateLimiter
@@ -237,7 +226,7 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 
 func (s *Service) FlushInBackground(batch *Batch) error {
 	stats := stat.New()
-	if s.retryCounter != nil {
+	if s.flushCounter != nil {
 		onDone := s.flushCounter.Begin(time.Now())
 		s.flushCounter.IncrementValue(stat.Pending)
 		defer func() {
@@ -264,8 +253,20 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 }
 
 func (s *Service) replayBatch(ctx context.Context, URL string) error {
+
+	stats := stat.New()
+	if s.retryCounter != nil {
+		onDone := s.retryCounter.Begin(time.Now())
+		s.retryCounter.IncrementValue(stat.Pending)
+		defer func() {
+			onDone(time.Now(), stats)
+			s.retryCounter.DecrementValue(stat.Pending)
+		}()
+	}
+
 	reader, err := s.fs.OpenURL(ctx, URL)
 	if err != nil {
+		stats.Append(err)
 		return err
 	}
 	defer reader.Close()
@@ -284,6 +285,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 		}
 
 		if err != nil {
+			stats.Append(err)
 			failed++
 			continue
 		}
@@ -292,6 +294,9 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 	batchID := shared.BatchID(URL)
 	data := s.mapperFn(acc)
 	err = s.loader.Load(ctx, data, batchID)
+	if err != nil {
+		stats.Append(err)
+	}
 	fmt.Printf("processed: %v, failed: %v\n", processed, failed)
 	if err == nil {
 		_ = s.fs.Delete(ctx, URL)
