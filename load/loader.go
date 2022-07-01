@@ -62,6 +62,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 	if err != nil {
 		return false, err
 	}
+	defer reader.Stmt().Close()
 	count := 0
 	err = reader.QueryAll(ctx, func(row interface{}) error {
 		count++
@@ -83,7 +84,6 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	if _, err := tx.Exec(DDL); err != nil {
 		return false, "", err
 	}
-
 	if _, err = tx.Exec("TRUNCATE TABLE " + sourceTable); err != nil {
 		return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
 	}
