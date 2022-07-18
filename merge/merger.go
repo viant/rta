@@ -31,12 +31,30 @@ type Service struct {
 	config  *config.Config
 	metrics *gmetric.Service
 	counter *gmetric.Operation
+	drop    *gmetric.Operation
 	journal *gmetric.Operation
+}
+
+func (s *Service) DropTableInBackground() {
+	timeout := s.config.Timeout()
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		startTime := time.Now()
+		err := s.DropTables(ctx)
+		if err != nil {
+			log.Printf("failed to merge: %v", err)
+		}
+		elapsed := time.Now().Sub(startTime)
+		thinkTime := s.config.ThinkTime() - elapsed
+		if thinkTime > 0 {
+			time.Sleep(thinkTime)
+		}
+		cancel()
+	}
 }
 
 func (s *Service) MergeInBackground() {
 	timeout := s.config.Timeout()
-
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		startTime := time.Now()
@@ -77,6 +95,7 @@ func (s *Service) Merge(ctx context.Context) error {
 	if product == nil {
 		product = &ansi.ANSI
 	}
+
 	for _, journal := range journals {
 		if err = s.processJournal(ctx, journal, db, product); err != nil {
 			stats.Append(err)
@@ -104,12 +123,6 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 	}
 
 	if err = s.updateJournal(ctx, db, jn, tx); err != nil {
-		_ = tx.Rollback()
-		stats.Append(err)
-		return err
-	}
-
-	if _, err = tx.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
 		_ = tx.Rollback()
 		stats.Append(err)
 		return err
@@ -152,6 +165,49 @@ func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) ([]*doma
 		return nil
 	})
 	return journals, err
+}
+
+func (s *Service) readTableForDrop(ctx context.Context, db *sql.DB) ([]*domain.Journal, error) {
+	inPast := time.Now().In(time.UTC).Add(-s.config.DeleteDelay())
+	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v AND UPDATED >= '%v'", s.config.JournalTable, shared.InActive,
+		inPast.Format("2006-01-02 15:04:05"))
+	reader, err := read.New(ctx, db, querySQL, func() interface{} { return &domain.Journal{} })
+	if err != nil {
+		return nil, err
+	}
+	var journals []*domain.Journal
+	err = reader.QueryAll(ctx, func(row interface{}) error {
+		journal := row.(*domain.Journal)
+		journals = append(journals, journal)
+		return nil
+	})
+	return journals, err
+}
+
+func (s *Service) DropTables(ctx context.Context) error {
+	stats := stat.New()
+	onDone := s.drop.Begin(time.Now())
+	defer func() {
+		onDone(time.Now(), stats)
+	}()
+	db, err := s.config.Connection.OpenDB(ctx)
+	if err != nil {
+		stats.Append(err)
+		return err
+	}
+	defer db.Close()
+	tablesToDrop, err := s.readTableForDrop(ctx, db)
+	if err != nil {
+		return err
+	}
+	for _, toDrop := range tablesToDrop {
+		if _, err = db.ExecContext(ctx, "DROP TABLE "+toDrop.TempTableName); err != err {
+			stats.Append(err)
+			continue
+		}
+		_, err = db.ExecContext(ctx, fmt.Sprintf("UPDATE %v SET STATUS = %v WHERE ID = %v ", s.config.JournalTable, shared.Deleted, toDrop.ID))
+	}
+	return nil
 }
 
 func (s *Service) updateJournal(ctx context.Context, db *sql.DB, jn *domain.Journal, tx *sql.Tx) error {
@@ -283,6 +339,11 @@ func New(c *config.Config) (*Service, error) {
 	srv := &Service{config: c, metrics: gmetric.New()}
 	srv.counter = srv.metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "merge", "merge operation", time.Microsecond, time.Minute, 2, provider.NewBasic())
 	srv.journal = srv.metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "journal", "journal merge operation", time.Microsecond, time.Minute, 2, provider.NewBasic())
+	srv.drop = srv.metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "drop", "drop merge operation", time.Microsecond, time.Minute, 2, provider.NewBasic())
+	go func() {
+		time.Sleep(5 * time.Second)
+		srv.DropTableInBackground()
+	}()
 	go srv.startEndpoint()
 	return srv, nil
 }
