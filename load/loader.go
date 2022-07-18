@@ -29,17 +29,17 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string) er
 		return err
 	}
 	defer db.Close()
-	tx, err := db.Begin()
+	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID)
 	if err != nil {
-		return err
-	}
-	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, tx, batchID)
-	if err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	if recordExist {
 		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
 	}
 	err = s.insertToJournal(ctx, db, tempTable, tx, batchID)
 	if err != nil {
@@ -71,7 +71,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 	return count > 0, err
 }
 
-func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, tx *sql.Tx, batchID string) (bool, string, error) {
+func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string) (bool, string, error) {
 	exist, err := s.checkRecordExistInJounral(ctx, db, batchID)
 	if err != nil {
 		return false, "", err
@@ -81,17 +81,17 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	}
 	sourceTable := s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
 	DDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v AS SELECT * FROM %v WHERE 1=0", sourceTable, s.config.Dest)
-	if _, err := tx.Exec(DDL); err != nil {
+	if _, err := db.Exec(DDL); err != nil {
 		return false, "", err
 	}
-	if _, err = tx.Exec("TRUNCATE TABLE " + sourceTable); err != nil {
+	if _, err = db.Exec("TRUNCATE TABLE " + sourceTable); err != nil {
 		return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
 	}
 	loadFn, err := s.loadFn(ctx, db, sourceTable)
 	if err != nil {
 		return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
 	}
-	_, err = loadFn(ctx, data, tx)
+	_, err = loadFn(ctx, data, db)
 	if err != nil {
 		err = fmt.Errorf("failed to load data into %v, %w", sourceTable, err)
 	}
