@@ -169,7 +169,7 @@ func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) ([]*doma
 
 func (s *Service) readTableForDrop(ctx context.Context, db *sql.DB) ([]*domain.Journal, error) {
 	inPast := time.Now().In(time.UTC).Add(-s.config.DeleteDelay())
-	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v AND UPDATED >= '%v'", s.config.JournalTable, shared.InActive,
+	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v AND UPDATED <= '%v'", s.config.JournalTable, shared.InActive,
 		inPast.Format("2006-01-02 15:04:05"))
 	reader, err := read.New(ctx, db, querySQL, func() interface{} { return &domain.Journal{} })
 	if err != nil {
