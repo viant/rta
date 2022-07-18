@@ -84,8 +84,13 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	if _, err := db.Exec(DDL); err != nil {
 		return false, "", err
 	}
-	if _, err = db.Exec("TRUNCATE TABLE " + sourceTable); err != nil {
-		return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
+	row := db.QueryRowContext(ctx, "SELECT COUNT(1) FROM "+sourceTable)
+	var count int
+	_ = row.Scan(&count)
+	if count > 0 {
+		if _, err = db.Exec("TRUNCATE TABLE " + sourceTable); err != nil {
+			return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
+		}
 	}
 	loadFn, err := s.loadFn(ctx, db, sourceTable)
 	if err != nil {
