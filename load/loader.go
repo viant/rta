@@ -88,7 +88,7 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	var count int
 	_ = row.Scan(&count)
 	if count > 0 {
-		if _, err = db.Exec("DELETE FROM  TABLE " + sourceTable); err != nil {
+		if _, err = db.Exec("DELETE FROM  " + sourceTable); err != nil {
 			return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
 		}
 	}
