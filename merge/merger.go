@@ -109,15 +109,17 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 		return err
 	}
 
+	if _, err = tx.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
+		_ = tx.Rollback()
+		stats.Append(err)
+		return err
+	}
+
 	if err = tx.Commit(); err != nil {
 		stats.Append(err)
 		return err
 	}
 
-	if _, err = db.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
-		stats.Append(err)
-		return err
-	}
 	return nil
 }
 
