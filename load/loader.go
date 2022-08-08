@@ -62,12 +62,12 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 	if err != nil {
 		return false, err
 	}
-	defer reader.Stmt().Close()
 	count := 0
 	err = reader.QueryAll(ctx, func(row interface{}) error {
 		count++
 		return nil
 	})
+	reader.Stmt().Close()
 	return count > 0, err
 }
 
