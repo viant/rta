@@ -106,7 +106,7 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 		return err
 	}
 	if s.config.Debug {
-		fmt.Printf("merge success table %v\n", jn.TempTableName)
+		fmt.Printf("success merge  table %v\n", jn.TempTableName)
 	}
 
 	if err = s.updateJournal(ctx, db, jn, tx); err != nil {
@@ -119,7 +119,7 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 	}
 
 	if s.config.Debug {
-		fmt.Printf("update status success table %v\n", jn.TempTableName)
+		fmt.Printf("success update table %v\n", jn.TempTableName)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -130,13 +130,17 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 		return err
 	}
 
+	if s.config.Debug {
+		fmt.Printf("success commit table %v\n", jn.TempTableName)
+	}
+
 	if _, err = db.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
 		stats.Append(err)
 		return err
 	}
 
 	if s.config.Debug {
-		fmt.Printf("drop success table %v\n", jn.TempTableName)
+		fmt.Printf("success drop  table %v\n", jn.TempTableName)
 	}
 
 	return nil
