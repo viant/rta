@@ -20,6 +20,7 @@ type (
 		TimeoutSec   int
 		ThinkTimeSec int
 		Endpoint     *Endpoint
+		Debug        bool
 	}
 
 	Endpoint struct {
