@@ -41,8 +41,8 @@ type Service struct {
 	*msg.Provider
 	flushCounter *gmetric.Operation
 	retryCounter *gmetric.Operation
-
-	sequence uint32
+	loadMux      sync.Mutex
+	sequence     uint32
 }
 
 func (s *Service) watchInBackground() {
@@ -244,7 +244,7 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 	batch.logger.Close()
 	data := s.mapperFn(batch.Accumulator)
-	err := s.loader.Load(context.Background(), data, batch.ID)
+	err := s.load(context.Background(), data, batch.ID)
 	if err != nil {
 		stats.Append(err)
 		return err
@@ -302,7 +302,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 	}
 	batchID := shared.BatchID(URL)
 	data := s.mapperFn(acc)
-	err = s.loader.Load(ctx, data, batchID)
+	err = s.load(ctx, data, batchID)
 	if err != nil {
 		stats.Append(err)
 	}
@@ -311,6 +311,16 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 		_ = s.fs.Delete(ctx, URL)
 	}
 	return nil
+}
+
+func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
+	s.loadMux.Lock()
+	err := s.loader.Load(ctx, data, batchID)
+	go func() {
+		time.Sleep(2 * time.Microsecond)
+		s.loadMux.Unlock()
+	}()
+	return err
 }
 
 func New(config *config.Config,
