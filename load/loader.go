@@ -80,7 +80,12 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 		return true, "", nil
 	}
 	sourceTable := s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
+
 	DDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v AS SELECT * FROM %v WHERE 1=0", sourceTable, s.config.Dest)
+	if s.config.UseCreateLike {
+		DDL = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v LIKE %v", sourceTable, s.config.Dest)
+	}
+
 	if _, err := db.Exec(DDL); err != nil {
 		return false, "", err
 	}

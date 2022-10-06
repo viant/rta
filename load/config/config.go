@@ -11,12 +11,13 @@ import (
 )
 
 type Config struct {
-	Dest         string             `yaml:"Dest"`
-	TransientDb  string             `yaml:"TransientDb"`
-	JournalTable string             `yaml:"JournalTable"`
-	Connection   *config.Connection `yaml:"Connection"`
-	UseInsertAPI bool
-	suffix       Suffix
+	Dest             string             `yaml:"Dest"`
+	TransientDb      string             `yaml:"TransientDb"`
+	JournalTable     string             `yaml:"JournalTable"`
+	Connection       *config.Connection `yaml:"Connection"`
+	UseCreateLikeDDL bool               `yaml:"UseCreateLikeDDL"`
+	UseInsertAPI     bool
+	suffix           Suffix
 }
 
 func (c *Config) TransientTable() string {
