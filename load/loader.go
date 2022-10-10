@@ -83,7 +83,7 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 
 	DDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v AS SELECT * FROM %v WHERE 1=0", sourceTable, s.config.Dest)
 	if s.config.CreateDDL != "" {
-		DDL = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v  %v", sourceTable, s.config.CreateDDL)
+		DDL = fmt.Sprintf(s.config.CreateDDL, sourceTable)
 	}
 
 	if _, err := db.Exec(DDL); err != nil {
