@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/viant/afs"
 	"github.com/viant/rta/config"
@@ -15,7 +16,8 @@ type Config struct {
 	TransientDb  string             `yaml:"TransientDb"`
 	JournalTable string             `yaml:"JournalTable"`
 	Connection   *config.Connection `yaml:"Connection"`
-	CreateDDL    string             `yaml:"CreateDDL"`
+	CreateDDLURL string             `yaml:"CreateDDLURL"`
+	CreateDDL    string
 	UseInsertAPI bool
 	suffix       Suffix
 }
@@ -54,7 +56,14 @@ func (c *Config) Validate() error {
 	if c.Connection.Dsn == "" {
 		return errors.Errorf("Dsn was empty")
 	}
-
+	if c.CreateDDLURL != "" {
+		fs := afs.New()
+		data, err := fs.DownloadWithURL(context.Background(), c.CreateDDLURL)
+		if err != nil {
+			return fmt.Errorf("error when read  CreateDDLURL %v", c.CreateDDLURL)
+		}
+		c.CreateDDL = string(data)
+	}
 	return nil
 }
 
@@ -80,5 +89,6 @@ func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to convert config: %v", URL)
 	}
+	fmt.Printf("cfg=%v\n", cfg)
 	return cfg, cfg.Validate()
 }
