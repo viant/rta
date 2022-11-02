@@ -13,6 +13,7 @@ import (
 	"github.com/viant/gmetric/provider"
 	"github.com/viant/gmetric/stat"
 	"github.com/viant/rta/collector/config"
+	loader2 "github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/shared"
 	"github.com/viant/tapper/io"
 	"reflect"
@@ -34,7 +35,7 @@ type Service struct {
 	keyFn       func(record interface{}) interface{}
 	reducerFn   func(accumulator, source interface{})
 	mapperFn    func(acc *Accumulator) interface{}
-	loader      Loader
+	loader      loader2.Loader
 	batch       *Batch
 	mux         sync.Mutex
 	encProvider *encoder.Provider
@@ -328,7 +329,7 @@ func New(config *config.Config,
 	key func(record interface{}) interface{},
 	reducer func(key, source interface{}),
 	mapper func(accumulator *Accumulator) interface{},
-	loader Loader, metrics *gmetric.Service) (*Service, error) {
+	loader loader2.Loader, metrics *gmetric.Service) (*Service, error) {
 	srv := &Service{
 		config:    config,
 		fs:        afs.New(),
