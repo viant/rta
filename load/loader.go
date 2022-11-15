@@ -67,12 +67,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 		count++
 		return nil
 	})
-
-	stmt := reader.Stmt()
-	if stmt != nil {
-		err = reader.Stmt().Close()
-	}
-
+	reader.Stmt().Close()
 	return count > 0, err
 }
 
