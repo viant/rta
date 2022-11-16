@@ -70,7 +70,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 
 	stmt := reader.Stmt()
 	if stmt != nil {
-		err2 := reader.Stmt().Close() //TODO prevent overriding err
+		err2 := stmt.Close()
 		if err == nil && err2 != nil {
 			err = err2
 		}
