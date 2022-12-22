@@ -77,3 +77,15 @@ func (c *Client) httpClient(endpoint *Endpoint) *http.Client {
 	c.mux.Unlock()
 	return client
 }
+
+// NewCLient creates a new client
+func NewClient(config *Config) *Client {
+	clt := &Client{
+		config: config,
+		client: nil,
+		mux:    sync.RWMutex{},
+	}
+
+	clt.client = clt.httpClient(&clt.config.Endpoint)
+	return clt
+}
