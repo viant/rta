@@ -10,6 +10,7 @@ import (
 	"github.com/viant/sqlx/io/insert"
 	"github.com/viant/sqlx/io/load"
 	"github.com/viant/sqlx/io/read"
+	"github.com/viant/sqlx/metadata/info/dialect"
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/option"
 	"strings"
@@ -148,7 +149,7 @@ func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable str
 		TempTableName: tempTable,
 		Created:       &ts,
 	}
-	_, _, err = insert.Exec(ctx, journal, tx)
+	_, _, err = insert.Exec(ctx, journal, tx, dialect.PresetIDStrategyIgnore)
 	return err
 
 }
