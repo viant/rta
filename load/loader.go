@@ -151,7 +151,6 @@ func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable str
 	}
 	_, _, err = insert.Exec(ctx, journal, tx, dialect.PresetIDStrategyIgnore)
 	return err
-
 }
 
 func (s *Service) init() error {
