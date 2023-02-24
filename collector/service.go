@@ -217,6 +217,9 @@ func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error)
 
 func (s *Service) reduce(acc *Accumulator, record interface{}) {
 	key := s.keyFn(record)
+	if key == "" {
+		return
+	}
 	accumulator, ok := acc.Get(key)
 	if !ok {
 		accumulator = s.newRecord()
