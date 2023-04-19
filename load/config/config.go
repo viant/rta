@@ -89,6 +89,5 @@ func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to convert config: %v", URL)
 	}
-	fmt.Printf("cfg=%v\n", cfg)
 	return cfg, cfg.Validate()
 }
