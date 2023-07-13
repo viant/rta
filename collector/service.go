@@ -62,6 +62,7 @@ func (s *Service) watchInBackground() {
 
 	for <-s.notifyPending {
 		b, err := s.getBatch()
+
 		if err != nil {
 			log.Println(err)
 		}
