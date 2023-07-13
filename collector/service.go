@@ -40,10 +40,18 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	flushCounter *gmetric.Operation
-	retryCounter *gmetric.Operation
-	loadMux      sync.Mutex
-	sequence     uint32
+	flushCounter  *gmetric.Operation
+	retryCounter  *gmetric.Operation
+	loadMux       sync.Mutex
+	pendingRetry  int32
+	notifyPending chan bool
+}
+
+func (s *Service) NotifyWatcher() {
+	select {
+	case s.notifyPending <- true:
+	default:
+	}
 }
 
 func (s *Service) watchInBackground() {
@@ -51,27 +59,33 @@ func (s *Service) watchInBackground() {
 	if s.config.Batch != nil {
 		sleepTime = s.config.Batch.MaxDuration()
 	}
-	for {
-		if atomic.LoadUint32(&s.sequence) == 0 {
-			time.Sleep(sleepTime)
-			continue
-		}
-		atomic.StoreUint32(&s.sequence, 0)
-		_, err := s.getBatch()
+
+	for <-s.notifyPending {
+		b, err := s.getBatch()
 		if err != nil {
 			log.Println(err)
 		}
-		time.Sleep(sleepTime)
+
+		if b != nil && atomic.LoadUint32(&b.flushed) == 0 && b.Accumulator.Len() > 0 {
+			time.Sleep(sleepTime)
+			s.NotifyWatcher()
+		}
 	}
 }
 
 func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
+	if !atomic.CompareAndSwapInt32(&s.pendingRetry, 0, 1) {
+		return nil
+	}
+
 	toRetry, err := s.loadFailedBatches(ctx, onStartUp)
 	if len(toRetry) == 0 {
+		atomic.StoreInt32(&s.pendingRetry, 0)
 		return err
 	}
 
 	if err != nil {
+		atomic.StoreInt32(&s.pendingRetry, 0)
 		return err
 	}
 	errors := shared.Errors{}
@@ -91,6 +105,7 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 		}(URL)
 	}
 	wg.Wait()
+	atomic.StoreInt32(&s.pendingRetry, 0)
 	return errors.First()
 }
 
@@ -182,7 +197,7 @@ func (s *Service) Collect(record interface{}) error {
 	}
 	message.Free()
 	_, err = s.flushIfNeed(batch)
-	atomic.AddUint32(&s.sequence, 1)
+	s.NotifyWatcher()
 	return err
 }
 
@@ -248,19 +263,45 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 	batch.logger.Close()
 	data := s.mapperFn(batch.Accumulator)
-	err := s.load(context.Background(), data, batch.ID)
-	if err != nil {
-		stats.Append(err)
-		return err
+
+	var allErrors []error
+	loadErr := s.load(context.Background(), data, batch.ID)
+
+	// In cause of load err delete pending file but not stream file
+	if loadErr != nil {
+		stats.Append(loadErr)
+		allErrors = append(allErrors, loadErr)
 	}
-	if err = s.fs.Delete(context.Background(), batch.PendingURL); err != nil {
-		stats.Append(err)
+
+	if err2 := s.fs.Delete(context.Background(), batch.PendingURL); err2 != nil {
+		stats.Append(err2)
+		allErrors = append(allErrors, err2)
 	}
-	if err = s.fs.Delete(context.Background(), batch.Stream.URL); err != nil {
-		stats.Append(err)
+
+	if loadErr != nil {
+		return s.joinErrors(allErrors)
 	}
+
+	if err3 := s.fs.Delete(context.Background(), batch.Stream.URL); err3 != nil {
+		stats.Append(err3)
+		allErrors = append(allErrors, err3)
+	}
+
+	err := s.joinErrors(allErrors)
 	if err == nil {
 		atomic.StoreUint32(&batch.flushed, 1)
+	}
+	return err
+}
+
+func (s *Service) joinErrors(allErrors []error) error {
+	var err error
+	for i, e := range allErrors {
+		if i == 0 {
+			err = allErrors[i]
+			continue
+		}
+		err = fmt.Errorf("%w; %w", err, e)
 	}
 	return err
 }
@@ -334,14 +375,15 @@ func New(config *config.Config,
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service) (*Service, error) {
 	srv := &Service{
-		config:    config,
-		fs:        afs.New(),
-		keyFn:     key,
-		newRecord: newRecord,
-		reducerFn: reducer,
-		mapperFn:  mapper,
-		loader:    loader,
-		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		config:        config,
+		fs:            afs.New(),
+		keyFn:         key,
+		newRecord:     newRecord,
+		reducerFn:     reducer,
+		mapperFn:      mapper,
+		notifyPending: make(chan bool, 1),
+		loader:        loader,
+		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 	}
 
 	if metrics != nil {
