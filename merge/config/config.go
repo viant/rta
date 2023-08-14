@@ -46,6 +46,7 @@ type Merge struct {
 	UniqueKeys    []string `yaml:"UniqueKeys"`
 	AggregableSum []string `yaml:"AggregableSum"`
 	AggregableMax []string `yaml:"AggregableMax"`
+	Overridden    []string `yaml:"Overridden"`
 	Others        []string `yaml:"Others"`
 }
 

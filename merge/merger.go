@@ -191,7 +191,7 @@ func (s *Service) updateJournal(ctx context.Context, db *sql.DB, jn *domain.Jour
 }
 
 func (s *Service) SQL(source, dest string, product *database.Product) (string, string) {
-	columns := strings.Join(append(append(append(s.config.Merge.Others, s.config.Merge.AggregableMax...), s.config.Merge.AggregableSum...), s.config.Merge.UniqueKeys...), ",")
+	columns := strings.Join(append(append(append(append(s.config.Merge.Others, s.config.Merge.Overridden...), s.config.Merge.AggregableMax...), s.config.Merge.AggregableSum...), s.config.Merge.UniqueKeys...), ",")
 	aggregableSums := ""
 	if len(s.config.Merge.AggregableSum) > 0 {
 		for _, a := range s.config.Merge.AggregableSum {
@@ -214,27 +214,39 @@ func (s *Service) SQL(source, dest string, product *database.Product) (string, s
 		}
 	}
 
+	overriddens := ""
+	if len(s.config.Merge.Overridden) > 0 {
+		for i := range s.config.Merge.Overridden {
+			o := s.config.Merge.Overridden[i]
+			if len(overriddens) > 0 {
+				overriddens = overriddens + "," + fmt.Sprintf("%v = s.%v", o, o)
+			} else {
+				overriddens = fmt.Sprintf("%v = s.%v", o, o)
+			}
+		}
+	}
+
 	productDialect := registry.LookupDialect(product)
 	switch productDialect.Upsert {
 	case dialect.UpsertTypeInsertOrUpdate:
 		{
-			return insertOrUpdateDDL(source, dest, columns, aggregableSums, aggregableMaxs), ""
+			return insertOrUpdateDDL(source, dest, columns, aggregableSums, aggregableMaxs, overriddens), ""
 		}
 
 	case dialect.UpsertTypeInsertOrReplace:
 		{
 
-			return insertOrReplaceDDL(source, dest, columns, aggregableSums, aggregableMaxs, s.config.Merge.UniqueKeys)
+			return insertOrReplaceDDL(source, dest, columns, aggregableSums, aggregableMaxs, overriddens, s.config.Merge.UniqueKeys)
 		}
 	default:
 		{
-			return insertOrReplaceDDL(source, dest, columns, aggregableSums, aggregableMaxs, s.config.Merge.UniqueKeys)
+			return insertOrReplaceDDL(source, dest, columns, aggregableSums, aggregableMaxs, overriddens, s.config.Merge.UniqueKeys)
 		}
 	}
 
 }
 
-func insertOrReplaceDDL(source string, dest string, columns string, aggregableSums string, aggregableMaxs string, uniqueKeys []string) (string, string) {
+func insertOrReplaceDDL(source string, dest string, columns string, aggregableSums string, aggregableMaxs string, overriddens string, uniqueKeys []string) (string, string) {
 	uniqueKeysCondition := ""
 	for _, key := range uniqueKeys {
 
@@ -247,7 +259,7 @@ func insertOrReplaceDDL(source string, dest string, columns string, aggregableSu
 
 	insertDDL := fmt.Sprintf("INSERT  INTO %v (%v) SELECT %v FROM %v s WHERE NOT EXISTS (SELECT 1 FROM %v  WHERE  %v)", dest, columns, columns, source, dest, uniqueKeysCondition)
 	updateDDL := ""
-	if aggregableSums != "" || aggregableMaxs != "" {
+	if aggregableSums != "" || aggregableMaxs != "" || overriddens != "" {
 
 		if aggregableSums != "" {
 			updateDDL = fmt.Sprintf("UPDATE %v  SET %v ", dest, aggregableSums)
@@ -259,15 +271,22 @@ func insertOrReplaceDDL(source string, dest string, columns string, aggregableSu
 				updateDDL = updateDDL + fmt.Sprintf("%v", aggregableMaxs)
 			}
 		}
+		if overriddens != "" {
+			if updateDDL != "" {
+				updateDDL = updateDDL + fmt.Sprintf(",%v", overriddens)
+			} else {
+				updateDDL = updateDDL + fmt.Sprintf("%v", overriddens)
+			}
+		}
 		updateDDL = updateDDL + fmt.Sprintf(" FROM %v s WHERE %v  ", source, uniqueKeysCondition)
 
 	}
 	return insertDDL, updateDDL
 }
 
-func insertOrUpdateDDL(source string, dest string, columns string, aggregableSums string, aggregableMaxs string) string {
+func insertOrUpdateDDL(source string, dest string, columns string, aggregableSums string, aggregableMaxs string, overriddens string) string {
 	updateDDL := fmt.Sprintf("INSERT INTO %v (%v) SELECT %v FROM %v s", dest, columns, columns, source)
-	if aggregableSums != "" || aggregableMaxs != "" {
+	if aggregableSums != "" || aggregableMaxs != "" || overriddens != "" {
 		updateDDL = updateDDL + " ON DUPLICATE KEY UPDATE "
 		if aggregableSums != "" {
 			updateDDL = updateDDL + fmt.Sprintf("%v", aggregableSums)
@@ -280,7 +299,16 @@ func insertOrUpdateDDL(source string, dest string, columns string, aggregableSum
 			}
 		}
 
+		if overriddens != "" {
+			if updateDDL != "" {
+				updateDDL = updateDDL + fmt.Sprintf(",%v", overriddens)
+			} else {
+				updateDDL = updateDDL + fmt.Sprintf("%v", overriddens)
+			}
+		}
+
 	}
+
 	return updateDDL
 }
 
