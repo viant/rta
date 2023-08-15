@@ -72,7 +72,7 @@ func (e *Endpoint) ResponseHeaderTimeout() time.Duration {
 		return e.responseHeaderTimeout
 	}
 	if e.ResponseHeaderTimeoutMs == 0 {
-		e.ResponseHeaderTimeoutMs = 240
+		e.ResponseHeaderTimeoutMs = 540
 	}
 	e.responseHeaderTimeout = time.Millisecond * time.Duration(e.ResponseHeaderTimeoutMs)
 	return e.responseHeaderTimeout
@@ -81,9 +81,6 @@ func (e *Endpoint) ResponseHeaderTimeout() time.Duration {
 func (e *Endpoint) KeepAliveTime() time.Duration {
 	if e.keepAliveTime != 0 {
 		return e.keepAliveTime
-	}
-	if e.KeepAliveTimeMs == 0 {
-		e.ResponseHeaderTimeoutMs = 540
 	}
 	e.keepAliveTime = time.Millisecond * time.Duration(e.KeepAliveTimeMs)
 	return e.keepAliveTime
