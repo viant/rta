@@ -107,50 +107,37 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 			return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
 		}
 	}
-
-	if s.config.UseInsertAPI {
-		insertFn, err := s.loadInsFn(ctx, db, sourceTable)
-		if err != nil {
-			return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
-		}
-		_, err = insertFn(ctx, data, db)
-		if err != nil {
-			err = fmt.Errorf("failed to load data into %v, %w", sourceTable, err)
-		}
-	} else {
-		loadFn, err := s.loadFn(ctx, db, sourceTable)
-		if err != nil {
-			return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
-		}
-
-		opts := option.Options{db}
-		lopts := []loption.Option{loption.WithCommonOptions(opts)}
-		_, err = loadFn(ctx, data, lopts...)
-		if err != nil {
-			err = fmt.Errorf("failed to load data into %v, %w", sourceTable, err)
-		}
+	loadFn, err := s.loadFn(ctx, db, sourceTable)
+	if err != nil {
+		return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
 	}
-
+	_, err = loadFn(ctx, data, WithDb(db))
+	if err != nil {
+		err = fmt.Errorf("failed to load data into %v, %w", sourceTable, err)
+	}
 	return false, sourceTable, err
 }
 
-func (s *Service) loadInsFn(ctx context.Context, db *sql.DB, sourceTable string) (Insert, error) {
-	srv, err := insert.New(ctx, db, sourceTable)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create insert service: %w", err)
-	}
-	return func(ctx context.Context, any interface{}, options ...option.Option) (int, error) {
-		affected, _, err := srv.Exec(ctx, any, options...)
-		return int(affected), err
-	}, nil
-}
-
 func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (Load, error) {
+	if s.config.UseInsertAPI {
+		srv, err := insert.New(ctx, db, sourceTable)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create insert service: %w", err)
+		}
+		return func(ctx context.Context, any interface{}, opts ...Option) (int, error) {
+			options := newOptions(opts)
+			affected, _, err := srv.Exec(ctx, any, options.db)
+			return int(affected), err
+		}, nil
+	}
 	srv, err := load.New(ctx, db, sourceTable)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create load service: %w", err)
 	}
-	return srv.Exec, nil
+	return func(ctx context.Context, any interface{}, opts ...Option) (int, error) {
+		options := newOptions(opts)
+		return srv.Exec(ctx, any, loption.WithCommonOptions([]option.Option{options.db}))
+	}, nil
 }
 
 func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable string, tx *sql.Tx, batchID string) error {

@@ -2,9 +2,28 @@ package load
 
 import (
 	"context"
-	"github.com/viant/sqlx/loption"
-	"github.com/viant/sqlx/option"
+	"database/sql"
 )
 
-type Load func(ctx context.Context, any interface{}, options ...loption.Option) (int, error)
-type Insert func(ctx context.Context, any interface{}, options ...option.Option) (int, error)
+type (
+	options struct {
+		db *sql.DB
+	}
+	Option func(o *options)
+)
+
+func WithDb(db *sql.DB) Option {
+	return func(o *options) {
+		o.db = db
+	}
+}
+
+func newOptions(opts []Option) *options {
+	ret := &options{}
+	for _, opt := range opts {
+		opt(ret)
+	}
+	return ret
+}
+
+type Load func(ctx context.Context, any interface{}, options ...Option) (int, error)
