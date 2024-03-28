@@ -1,6 +1,6 @@
 module github.com/viant/rta
 
-go 1.17
+go 1.21.6
 
 require (
 	github.com/francoispqt/gojay v1.2.13
