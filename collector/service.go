@@ -16,16 +16,16 @@ import (
 	loader2 "github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/shared"
 	"github.com/viant/tapper/io"
-	"reflect"
-	"sync/atomic"
-	"time"
-
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/msg"
 	tjson "github.com/viant/tapper/msg/json"
 	"log"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type Service struct {
@@ -40,37 +40,24 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	flushCounter  *gmetric.Operation
-	retryCounter  *gmetric.Operation
-	loadMux       sync.Mutex
-	pendingRetry  int32
-	notifyPending chan bool
-}
-
-func (s *Service) NotifyWatcher() {
-	select {
-	case s.notifyPending <- true:
-	default:
-	}
+	flushCounter *gmetric.Operation
+	retryCounter *gmetric.Operation
+	loadMux      sync.Mutex
+	pendingRetry int32
+	metrics      *gmetric.Service
 }
 
 func (s *Service) watchInBackground() {
-	sleepTime := time.Second
-	if s.config.Batch != nil {
-		sleepTime = s.config.Batch.MaxDuration()
-	}
+	sleepTime := 700 * time.Millisecond
 
-	for <-s.notifyPending {
-		b, err := s.getBatch()
-
-		if err != nil {
-			log.Println(err)
+	for {
+		time.Sleep(sleepTime)
+		b := s.batch
+		if b == nil || b.IsActive(s.config.Batch) {
+			continue
 		}
-
-		if b != nil && atomic.LoadUint32(&b.flushed) == 0 && b.Accumulator.Len() > 0 {
-			time.Sleep(sleepTime)
-			s.NotifyWatcher()
-		}
+		time.Sleep(100 * time.Millisecond) // extra time to minimize risk of using batch in Collect fn during flushing
+		_ = s.flushIfNeed(s.batch)
 	}
 }
 
@@ -112,7 +99,7 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 
 func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]string, error) {
 	URL := url.Normalize(s.config.Stream.URL, file.Scheme)
-	parentURL, _ := url.Split(URL, file.Scheme)
+	parentURL, name := url.Split(URL, file.Scheme)
 	objects, err := s.fs.List(ctx, parentURL)
 	if err != nil {
 		return nil, err
@@ -124,6 +111,10 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]stri
 		if candidate.IsDir() {
 			continue
 		}
+		if !strings.HasPrefix(candidate.Name(), name) {
+			continue
+		}
+
 		if strings.HasSuffix(candidate.URL(), shared.PendingSuffix) {
 			if onStartUp {
 				_ = s.fs.Delete(ctx, candidate.URL())
@@ -149,9 +140,9 @@ func (s *Service) getBatch() (*Batch, error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	if batch := s.batch; batch != nil {
-		b, err := s.flushIfNeed(batch)
+		b := s.flushIfNeed(batch)
 		if b != nil {
-			return b, err
+			return b, nil
 		}
 	}
 	batch, err := NewBatch(s.config.Stream, s.fs)
@@ -162,16 +153,20 @@ func (s *Service) getBatch() (*Batch, error) {
 	return batch, nil
 }
 
-func (s *Service) flushIfNeed(batch *Batch) (*Batch, error) {
+func (s *Service) flushIfNeed(batch *Batch) *Batch {
 	if batch.IsActive(s.config.Batch) {
-		return batch, nil
+		return batch
 	}
+	if atomic.LoadUint32(&batch.flushStarted) == 1 {
+		return nil
+	}
+
 	go func() {
 		if err := s.FlushInBackground(batch); err != nil {
 			log.Println(err)
 		}
 	}()
-	return nil, nil
+	return nil
 }
 
 func (s *Service) Collect(record interface{}) error {
@@ -179,8 +174,11 @@ func (s *Service) Collect(record interface{}) error {
 	if err != nil {
 		return err
 	}
-	data := batch.Accumulator
-	s.reduce(data, record)
+
+	batch.Mutex.Lock()
+	defer batch.Mutex.Unlock()
+
+	s.reduce(batch.Accumulator, record)
 	message := s.Provider.NewMessage()
 
 	enc, ok := record.(io.Encoder)
@@ -197,8 +195,6 @@ func (s *Service) Collect(record interface{}) error {
 		return err
 	}
 	message.Free()
-	_, err = s.flushIfNeed(batch)
-	s.NotifyWatcher()
 	return err
 }
 
@@ -245,14 +241,11 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
-	batch.Mutex.Lock()
-	defer func() {
-		batch.Mutex.Unlock()
-	}()
-	if atomic.LoadUint32(&batch.flushed) == 1 {
+	if !atomic.CompareAndSwapUint32(&batch.flushStarted, 0, 1) {
 		return nil
 	}
-
+	batch.Mutex.Lock()
+	defer batch.Mutex.Unlock()
 	stats := stat.New()
 	if s.flushCounter != nil {
 		onDone := s.flushCounter.Begin(time.Now())
@@ -263,12 +256,16 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 		}()
 	}
 	batch.logger.Close()
-	data := s.mapperFn(batch.Accumulator)
 
 	var allErrors []error
-	loadErr := s.load(context.Background(), data, batch.ID)
+	var loadErr error
 
-	// In cause of load err delete pending file but not stream file
+	// prevent load when batch is empty, csv writer will return error in that case
+	if batch.Accumulator.Len() != 0 {
+		data := s.mapperFn(batch.Accumulator)
+		loadErr = s.load(context.Background(), data, batch.ID)
+	}
+
 	if loadErr != nil {
 		stats.Append(loadErr)
 		allErrors = append(allErrors, loadErr)
@@ -279,6 +276,7 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 		allErrors = append(allErrors, err2)
 	}
 
+	// In cause of load err do return, after deleting pending file (prevent deleting stream file)
 	if loadErr != nil {
 		return s.joinErrors(allErrors)
 	}
@@ -289,9 +287,6 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 
 	err := s.joinErrors(allErrors)
-	if err == nil {
-		atomic.StoreUint32(&batch.flushed, 1)
-	}
 	return err
 }
 
@@ -352,7 +347,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 	if err != nil {
 		stats.Append(err)
 	}
-	fmt.Printf("processed: %v, failed: %v\n", processed, failed)
+	log.Printf("replaybatch - processed: %v, failed: %v\n", processed, failed)
 	if err == nil {
 		_ = s.fs.Delete(ctx, URL)
 	}
@@ -376,15 +371,15 @@ func New(config *config.Config,
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service) (*Service, error) {
 	srv := &Service{
-		config:        config,
-		fs:            afs.New(),
-		keyFn:         key,
-		newRecord:     newRecord,
-		reducerFn:     reducer,
-		mapperFn:      mapper,
-		notifyPending: make(chan bool, 1),
-		loader:        loader,
-		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		config:    config,
+		fs:        afs.New(),
+		keyFn:     key,
+		newRecord: newRecord,
+		reducerFn: reducer,
+		mapperFn:  mapper,
+		loader:    loader,
+		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		metrics:   metrics,
 	}
 
 	if metrics != nil {
@@ -397,4 +392,73 @@ func New(config *config.Config,
 		go srv.watchInBackground()
 	}
 	return srv, err
+}
+
+// copy service configuration
+func prepareConfig(cfg *config.Config, position int) *config.Config {
+	result := *cfg
+	result.ID = result.ID + strconv.Itoa(position)
+	if result.Stream == nil {
+		return &result
+	}
+
+	stream := *cfg.Stream
+	result.Stream = &stream
+	index := strings.LastIndex(result.Stream.URL, "/")
+	if index > -1 {
+		result.Stream.URL = result.Stream.URL[:index] + "/" + strconv.Itoa(position) + "/" + result.Stream.URL[index+1:]
+	}
+
+	return &result
+}
+
+func (s *Service) addStreamSubfolder() *config.Config {
+	result := *s.config
+	return &result
+}
+
+func NewCollectors(config *config.Config,
+	newRecord func() interface{},
+	key func(record interface{}) interface{},
+	reducer func(key, source interface{}),
+	mapper func(accumulator *Accumulator) interface{},
+	loader loader2.Loader, metrics *gmetric.Service, count int) ([]*Service, []Collector, error) {
+
+	fs := afs.New()
+	URL := url.Normalize(config.Stream.URL, file.Scheme)
+	parentURL, _ := url.Split(URL, file.Scheme)
+	_, err := fs.List(context.Background(), parentURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	result := make([]*Service, count)
+
+	for i := 0; i < count; i++ {
+		aConfig := prepareConfig(config, i)
+		err = ensureParentDir(aConfig, fs)
+		result[i], err = New(aConfig, newRecord, key, reducer, mapper, loader, metrics)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	iCollectors := make([]Collector, len(result))
+	for i, c := range result {
+		iCollectors[i] = c
+	}
+
+	return result, iCollectors, nil
+}
+
+func ensureParentDir(aConfig *config.Config, fs afs.Service) error {
+	URL := url.Normalize(aConfig.Stream.URL, file.Scheme)
+	parentURL, _ := url.Split(URL, file.Scheme)
+	_, err := fs.List(context.Background(), parentURL)
+	if err != nil {
+		if err = fs.Create(context.Background(), parentURL, file.DefaultDirOsMode, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }

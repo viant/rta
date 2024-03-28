@@ -9,7 +9,6 @@ import (
 	"github.com/viant/rta/shared"
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/tapper/log"
-	"github.com/viant/toolbox"
 	"sync"
 	"time"
 )
@@ -24,7 +23,7 @@ type (
 		logger      *log.Logger
 		PendingURL  string
 		sync.Mutex
-		flushed uint32
+		flushStarted uint32
 	}
 
 	Accumulator struct {
@@ -57,8 +56,8 @@ func NewAccumulator() *Accumulator {
 	return &Accumulator{Map: map[interface{}]interface{}{}}
 }
 
-func (b Batch) IsActive(batch *config.Batch) bool {
-	return toolbox.AsInt(b.Accumulator.Len()) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration()
+func (b *Batch) IsActive(batchCfg *config.Batch) bool {
+	return b.Accumulator.Len() < batchCfg.MaxElements && time.Now().Sub(b.Started) < batchCfg.MaxDuration()
 }
 
 func NewBatch(stream *tconfig.Stream, fs afs.Service) (*Batch, error) {

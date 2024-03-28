@@ -2,17 +2,47 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/rta/collector"
+	"github.com/viant/rta/shared"
 	"github.com/viant/xunsafe"
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"sync"
 )
 
-type Handler struct {
-	collector  collector.Collector
-	targetType reflect.Type
+type (
+	Handler struct {
+		collectors []*Collector
+		targetType reflect.Type
+	}
+
+	Collector struct {
+		collector.Collector
+		xSlice *xunsafe.Slice
+	}
+)
+
+func (c *Collector) SliceLen(source interface{}) int {
+	slicePtr := xunsafe.AsPointer(source)
+	return c.xSlice.Len(slicePtr)
+}
+
+func (c *Collector) CollectAll(source interface{}, from, to int, errors *shared.Errors, wg *sync.WaitGroup) {
+	if wg != nil {
+		defer wg.Done()
+	}
+
+	slicePtr := xunsafe.AsPointer(source)
+	for i := from; i < to; i++ {
+		record := c.xSlice.ValuePointerAt(slicePtr, i)
+		if err := c.Collector.Collect(record); err != nil {
+			errors.Add(err)
+			return
+		}
+	}
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -46,15 +76,35 @@ func (h *Handler) Handle(data []byte) error {
 	if err := gojay.Unmarshal(data, request); err != nil {
 		return err
 	}
-	slicePtr := xunsafe.AsPointer(sliceValuePtr.Interface())
-	xSlice := xunsafe.NewSlice(h.targetType, slicePtr)
-	for i := 0; i < xSlice.Len(slicePtr); i++ {
-		record := xSlice.ValuePointerAt(slicePtr, i)
-		if err := h.collector.Collect(record); err != nil {
-			return err
-		}
+
+	recordCount := h.collectors[0].SliceLen(request.Records)
+	if recordCount == 0 {
+		return nil
 	}
-	return nil
+
+	collectorCnt := len(h.collectors)
+	if collectorCnt == 0 {
+		return fmt.Errorf("rta collector proxy handler: no collectors defined")
+	}
+
+	errors := &shared.Errors{}
+	if collectorCnt == 1 {
+		h.collectors[0].CollectAll(request.Records, 0, recordCount, errors, nil)
+	} else {
+
+		wg := sync.WaitGroup{}
+		chunkSize := recordCount / collectorCnt
+		for n := 0; n < collectorCnt; n++ {
+			end := (n + 1) * chunkSize
+			if n == collectorCnt-1 {
+				end = recordCount
+			}
+			wg.Add(1)
+			go h.collectors[n].CollectAll(request.Records, n*chunkSize, end, errors, &wg)
+		}
+		wg.Wait()
+	}
+	return errors.First()
 }
 
 func (h *Handler) readPayload(request *http.Request) ([]byte, error) {
@@ -66,6 +116,11 @@ func (h *Handler) readPayload(request *http.Request) ([]byte, error) {
 	return data, err
 }
 
-func NewHandler(aCollector collector.Collector, targetSliceType reflect.Type) *Handler {
-	return &Handler{collector: aCollector, targetType: targetSliceType}
+func NewHandler(targetSliceType reflect.Type, collectors ...collector.Collector) *Handler {
+	var result = &Handler{targetType: targetSliceType}
+	result.collectors = make([]*Collector, len(collectors))
+	for i, aCollector := range collectors {
+		result.collectors[i] = &Collector{Collector: aCollector, xSlice: xunsafe.NewSlice(targetSliceType)}
+	}
+	return result
 }
