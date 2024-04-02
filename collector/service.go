@@ -40,24 +40,38 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	flushCounter *gmetric.Operation
-	retryCounter *gmetric.Operation
-	loadMux      sync.Mutex
-	pendingRetry int32
-	metrics      *gmetric.Service
+	flushCounter  *gmetric.Operation
+	retryCounter  *gmetric.Operation
+	loadMux       sync.Mutex
+	pendingRetry  int32
+	notifyPending chan bool
+	metrics       *gmetric.Service
+}
+
+func (s *Service) NotifyWatcher() {
+	select {
+	case s.notifyPending <- true:
+	default:
+	}
 }
 
 func (s *Service) watchInBackground() {
-	sleepTime := 700 * time.Millisecond
+	sleepTime := time.Second
+	if s.config.Batch != nil {
+		sleepTime = s.config.Batch.MaxDuration()
+	}
 
-	for {
-		time.Sleep(sleepTime)
-		b := s.batch
-		if b == nil || b.IsActive(s.config.Batch) {
-			continue
+	for <-s.notifyPending {
+		b, err := s.getBatch()
+
+		if err != nil {
+			log.Println(err)
 		}
-		time.Sleep(100 * time.Millisecond) // extra time to minimize risk of using batch in Collect fn during flushing
-		_ = s.flushIfNeed(s.batch)
+
+		if b != nil && atomic.LoadUint32(&b.flushed) == 0 && b.Accumulator.Len() > 0 {
+			time.Sleep(sleepTime)
+			s.NotifyWatcher()
+		}
 	}
 }
 
@@ -99,7 +113,7 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 
 func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]string, error) {
 	URL := url.Normalize(s.config.Stream.URL, file.Scheme)
-	parentURL, name := url.Split(URL, file.Scheme)
+	parentURL, _ := url.Split(URL, file.Scheme)
 	objects, err := s.fs.List(ctx, parentURL)
 	if err != nil {
 		return nil, err
@@ -111,10 +125,6 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]stri
 		if candidate.IsDir() {
 			continue
 		}
-		if !strings.HasPrefix(candidate.Name(), name) {
-			continue
-		}
-
 		if strings.HasSuffix(candidate.URL(), shared.PendingSuffix) {
 			if onStartUp {
 				_ = s.fs.Delete(ctx, candidate.URL())
@@ -140,9 +150,9 @@ func (s *Service) getBatch() (*Batch, error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	if batch := s.batch; batch != nil {
-		b := s.flushIfNeed(batch)
+		b, err := s.flushIfNeed(batch)
 		if b != nil {
-			return b, nil
+			return b, err
 		}
 	}
 	batch, err := NewBatch(s.config.Stream, s.fs)
@@ -153,20 +163,16 @@ func (s *Service) getBatch() (*Batch, error) {
 	return batch, nil
 }
 
-func (s *Service) flushIfNeed(batch *Batch) *Batch {
+func (s *Service) flushIfNeed(batch *Batch) (*Batch, error) {
 	if batch.IsActive(s.config.Batch) {
-		return batch
+		return batch, nil
 	}
-	if atomic.LoadUint32(&batch.flushStarted) == 1 {
-		return nil
-	}
-
 	go func() {
 		if err := s.FlushInBackground(batch); err != nil {
 			log.Println(err)
 		}
 	}()
-	return nil
+	return nil, nil
 }
 
 func (s *Service) Collect(record interface{}) error {
@@ -174,11 +180,8 @@ func (s *Service) Collect(record interface{}) error {
 	if err != nil {
 		return err
 	}
-
-	batch.Mutex.Lock()
-	defer batch.Mutex.Unlock()
-
-	s.reduce(batch.Accumulator, record)
+	data := batch.Accumulator
+	s.reduce(data, record)
 	message := s.Provider.NewMessage()
 
 	enc, ok := record.(io.Encoder)
@@ -195,6 +198,8 @@ func (s *Service) Collect(record interface{}) error {
 		return err
 	}
 	message.Free()
+	_, err = s.flushIfNeed(batch)
+	s.NotifyWatcher()
 	return err
 }
 
@@ -241,11 +246,14 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
-	if !atomic.CompareAndSwapUint32(&batch.flushStarted, 0, 1) {
+	batch.Mutex.Lock()
+	defer func() {
+		batch.Mutex.Unlock()
+	}()
+	if atomic.LoadUint32(&batch.flushed) == 1 {
 		return nil
 	}
-	batch.Mutex.Lock()
-	defer batch.Mutex.Unlock()
+
 	stats := stat.New()
 	if s.flushCounter != nil {
 		onDone := s.flushCounter.Begin(time.Now())
@@ -256,16 +264,12 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 		}()
 	}
 	batch.logger.Close()
+	data := s.mapperFn(batch.Accumulator)
 
 	var allErrors []error
-	var loadErr error
+	loadErr := s.load(context.Background(), data, batch.ID)
 
-	// prevent load when batch is empty, csv writer will return error in that case
-	if batch.Accumulator.Len() != 0 {
-		data := s.mapperFn(batch.Accumulator)
-		loadErr = s.load(context.Background(), data, batch.ID)
-	}
-
+	// In cause of load err delete pending file but not stream file
 	if loadErr != nil {
 		stats.Append(loadErr)
 		allErrors = append(allErrors, loadErr)
@@ -276,7 +280,6 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 		allErrors = append(allErrors, err2)
 	}
 
-	// In cause of load err do return, after deleting pending file (prevent deleting stream file)
 	if loadErr != nil {
 		return s.joinErrors(allErrors)
 	}
@@ -287,6 +290,9 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 
 	err := s.joinErrors(allErrors)
+	if err == nil {
+		atomic.StoreUint32(&batch.flushed, 1)
+	}
 	return err
 }
 
@@ -371,15 +377,16 @@ func New(config *config.Config,
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service) (*Service, error) {
 	srv := &Service{
-		config:    config,
-		fs:        afs.New(),
-		keyFn:     key,
-		newRecord: newRecord,
-		reducerFn: reducer,
-		mapperFn:  mapper,
-		loader:    loader,
-		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
-		metrics:   metrics,
+		config:        config,
+		fs:            afs.New(),
+		keyFn:         key,
+		newRecord:     newRecord,
+		reducerFn:     reducer,
+		mapperFn:      mapper,
+		notifyPending: make(chan bool, 1),
+		loader:        loader,
+		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		metrics:       metrics,
 	}
 
 	if metrics != nil {
