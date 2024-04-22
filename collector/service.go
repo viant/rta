@@ -52,6 +52,7 @@ type Service struct {
 	notifyPending chan bool
 	metrics       *gmetric.Service
 	options       []Option
+	instanceId    string
 }
 
 func (s *Service) NotifyWatcher() {
@@ -417,7 +418,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 
 func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
 	s.loadMux.Lock()
-	err := s.loader.Load(ctx, data, batchID)
+	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId))
 	go func() {
 		time.Sleep(2 * time.Microsecond)
 		s.loadMux.Unlock()
@@ -443,6 +444,7 @@ func New(config *config.Config,
 		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 		metrics:       metrics,
 		options:       options,
+		instanceId:    NewOptions(options...).GetInstanceId(),
 	}
 
 	if metrics != nil {
@@ -520,7 +522,7 @@ func NewCollectors(config *config.Config,
 		for i := 0; i < count; i++ {
 			aConfig := prepareConfig(config, i)
 			err = ensureParentDir(aConfig, fs)
-			result[i], err = New(aConfig, newRecord, key, reducer, mapper, loader, metrics, WithStreamURLSymLinkTrg(URL))
+			result[i], err = New(aConfig, newRecord, key, reducer, mapper, loader, metrics, WithStreamURLSymLinkTrg(URL), WithInstanceId(strconv.Itoa(i)))
 			if err != nil {
 				return nil, nil, err
 			}

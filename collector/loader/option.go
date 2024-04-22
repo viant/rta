@@ -1,9 +1,8 @@
-package collector
+package loader
 
 type (
 	Options struct {
-		streamURLSymLinkTrg string
-		instanceId          string
+		instanceId string
 	}
 
 	Option func(o *Options)
@@ -15,12 +14,6 @@ func NewOptions(options ...Option) *Options {
 		item(ret)
 	}
 	return ret
-}
-
-func WithStreamURLSymLinkTrg(streamURLSymLinkTrg string) Option {
-	return func(o *Options) {
-		o.streamURLSymLinkTrg = streamURLSymLinkTrg
-	}
 }
 
 func WithInstanceId(instanceId string) Option {
@@ -36,10 +29,6 @@ func (o *Options) Apply(opts ...Option) {
 	for _, opt := range opts {
 		opt(o)
 	}
-}
-
-func (o *Options) GetStreamURLSymLinkTrg() string {
-	return o.streamURLSymLinkTrg
 }
 
 func (o *Options) GetInstanceId() string {

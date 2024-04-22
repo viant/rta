@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
+	"github.com/viant/rta/collector/loader"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -17,7 +18,7 @@ type Client struct {
 	mux    sync.RWMutex
 }
 
-func (c *Client) Load(ctx context.Context, data interface{}, batchID string) error {
+func (c *Client) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
 	request := &Request{BatchID: batchID, Records: data}
 	httpClient := c.httpClient(&c.config.Endpoint)
 	httpRequest, err := request.httpRequest(&c.config.Endpoint)

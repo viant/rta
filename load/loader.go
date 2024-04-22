@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/domain"
 	"github.com/viant/rta/load/config"
 	"github.com/viant/rta/shared"
@@ -25,13 +26,14 @@ type Service struct {
 	suffix       config.Suffix
 }
 
-func (s *Service) Load(ctx context.Context, data interface{}, batchID string) error {
+func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
 	db, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID)
+	collectorId := loader.NewOptions(options...).GetInstanceId()
+	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID, collectorId)
 	if err != nil {
 		return err
 	}
@@ -81,7 +83,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 	return count > 0, err
 }
 
-func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string) (bool, string, error) {
+func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string, collectorId string) (bool, string, error) {
 	exist, err := s.checkRecordExistInJounral(ctx, db, batchID)
 	if err != nil {
 		return false, "", err
@@ -89,7 +91,13 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	if exist {
 		return true, "", nil
 	}
-	sourceTable := s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
+
+	var sourceTable string
+	if collectorId != "" {
+		sourceTable = s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()() + "_" + collectorId
+	} else {
+		sourceTable = s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
+	}
 
 	DDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v AS SELECT * FROM %v WHERE 1=0", sourceTable, s.config.Dest)
 	if s.config.CreateDDL != "" {
