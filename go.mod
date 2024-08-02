@@ -14,7 +14,7 @@ require (
 	github.com/viant/dsunit v0.10.10
 	github.com/viant/gmetric v0.2.7-0.20220509165352-32e81d5e5fd8
 	github.com/viant/scy v0.1.1-0.20220629173947-775b550f1578
-	github.com/viant/sqlx v0.15.2-0.20240802160607-3a3a89919488
+	github.com/viant/sqlx v0.15.2-0.20240802175425-e8a939a4cf7b
 	github.com/viant/tapper v0.6.4-0.20220622150849-b84262d38655
 	github.com/viant/toolbox v0.34.6-0.20221112031702-3e7cdde7f888
 	github.com/viant/xunsafe v0.9.2
@@ -34,7 +34,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/viant/dsc v0.16.2 // indirect
 	github.com/viant/parsly v0.3.3-0.20240717150634-e1afaedb691b // indirect
-	github.com/viant/structology v0.5.6-0.20240715114555-e89beafaa7b8 // indirect
+	github.com/viant/structology v0.5.6-0.20240802174922-5eb157550455 // indirect
 	github.com/viant/tagly v0.2.0 // indirect
 	github.com/viant/xreflect v0.6.2 // indirect
 	golang.org/x/crypto v0.22.0 // indirect
