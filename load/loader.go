@@ -27,6 +27,15 @@ type Service struct {
 }
 
 func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
+	switch s.config.Mode {
+	case config.Direct:
+		return s.loadDirect(ctx, data, batchID, options...)
+	default:
+		return s.loadIndirect(ctx, data, batchID, options...)
+	}
+}
+
+func (s *Service) loadIndirect(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
 	db, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
 		return err
