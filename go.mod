@@ -14,7 +14,7 @@ require (
 	github.com/viant/dsunit v0.10.10
 	github.com/viant/gmetric v0.2.7-0.20220509165352-32e81d5e5fd8
 	github.com/viant/scy v0.1.1-0.20220629173947-775b550f1578
-	github.com/viant/sqlx v0.15.2-0.20240802175425-e8a939a4cf7b
+	github.com/viant/sqlx v0.15.2-0.20240814143522-e5ed21cf5a9e
 	github.com/viant/tapper v0.6.4-0.20220622150849-b84262d38655
 	github.com/viant/toolbox v0.34.6-0.20221112031702-3e7cdde7f888
 	github.com/viant/xunsafe v0.9.2
