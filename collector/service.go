@@ -199,6 +199,15 @@ func (s *Service) Collect(record interface{}) error {
 	}
 	data := batch.Accumulator
 	s.reduce(data, record)
+	if s.config.IsStreamEnabled() {
+		err = s.backupLogEntry(record, batch)
+	}
+	_, err = s.flushIfNeed(batch)
+	s.NotifyWatcher()
+	return err
+}
+
+func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 	message := s.Provider.NewMessage()
 
 	enc, ok := record.(io.Encoder)
@@ -211,13 +220,11 @@ func (s *Service) Collect(record interface{}) error {
 	}
 
 	enc.Encode(message)
-	if err = batch.logger.Log(message); err != nil {
+	if err := batch.logger.Log(message); err != nil {
 		return err
 	}
 	message.Free()
-	_, err = s.flushIfNeed(batch)
-	s.NotifyWatcher()
-	return err
+	return nil
 }
 
 func (s *Service) Close() error {
