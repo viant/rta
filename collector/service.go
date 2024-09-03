@@ -40,38 +40,40 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	flushCounter  *gmetric.Operation
-	retryCounter  *gmetric.Operation
-	loadMux       sync.Mutex
-	pendingRetry  int32
-	notifyPending chan bool
+	flushCounter        *gmetric.Operation
+	retryCounter        *gmetric.Operation
+	loadMux             sync.Mutex
+	pendingRetry        int32
+	notificationCounter int32
+	closed              int32
 }
 
 func (s *Service) NotifyWatcher() {
-	select {
-	case s.notifyPending <- true:
-	default:
-	}
+	atomic.AddInt32(&s.notificationCounter, 1)
 }
 
 func (s *Service) watchInBackground() {
-	sleepTime := time.Second
-	if s.config.Batch != nil {
-		sleepTime = s.config.Batch.MaxDuration()
-	}
-
-	for <-s.notifyPending {
+	sleepTime := 100 * time.Millisecond
+	for !s.IsClosed() {
+		count := atomic.LoadInt32(&s.notificationCounter)
+		if count == 0 {
+			time.Sleep(sleepTime)
+			continue
+		}
+		atomic.AddInt32(&s.notificationCounter, -1)
 		b, err := s.getBatch()
-
 		if err != nil {
 			log.Println(err)
 		}
-
 		if b != nil && atomic.LoadUint32(&b.flushed) == 0 && b.Accumulator.Len() > 0 {
 			time.Sleep(sleepTime)
 			s.NotifyWatcher()
 		}
 	}
+}
+
+func (s *Service) IsClosed() bool {
+	return atomic.LoadInt32(&s.closed) == 1
 }
 
 func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
@@ -214,6 +216,7 @@ func (s *Service) Close() error {
 	if err != nil {
 		log.Println(err)
 	}
+	atomic.AddInt32(&s.closed, 1)
 	return err
 }
 
@@ -245,13 +248,13 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
+	if atomic.LoadUint32(&batch.flushed) == 1 {
+		return nil
+	}
 	batch.Mutex.Lock()
 	defer func() {
 		batch.Mutex.Unlock()
 	}()
-	if atomic.LoadUint32(&batch.flushed) == 1 {
-		return nil
-	}
 
 	stats := stat.New()
 	if s.flushCounter != nil {
@@ -376,15 +379,14 @@ func New(config *config.Config,
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service) (*Service, error) {
 	srv := &Service{
-		config:        config,
-		fs:            afs.New(),
-		keyFn:         key,
-		newRecord:     newRecord,
-		reducerFn:     reducer,
-		mapperFn:      mapper,
-		notifyPending: make(chan bool, 1),
-		loader:        loader,
-		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		config:    config,
+		fs:        afs.New(),
+		keyFn:     key,
+		newRecord: newRecord,
+		reducerFn: reducer,
+		mapperFn:  mapper,
+		loader:    loader,
+		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 	}
 
 	if metrics != nil {
