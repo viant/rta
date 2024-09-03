@@ -9,17 +9,22 @@ import (
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
+	"strings"
 )
 
 type Config struct {
-	Dest         string             `yaml:"Dest"`
-	TransientDb  string             `yaml:"TransientDb"`
-	JournalTable string             `yaml:"JournalTable"`
-	Connection   *config.Connection `yaml:"Connection"`
-	CreateDDLURL string             `yaml:"CreateDDLURL"`
-	CreateDDL    string
-	UseInsertAPI bool
-	suffix       Suffix
+	Dest              string             `yaml:"Dest"`
+	TransientDb       string             `yaml:"TransientDb"`
+	JournalTable      string             `yaml:"JournalTable"`
+	Connection        *config.Connection `yaml:"Connection"`
+	CreateDDLURL      string             `yaml:"CreateDDLURL"`
+	CreateDDL         string
+	UseInsertAPI      bool
+	suffix            Suffix
+	Mode              string
+	ConnectionJn      *config.Connection
+	OnDuplicateKeySql string
+	BatchSize         int
 }
 
 func (c *Config) TransientTable() string {
@@ -41,6 +46,17 @@ func (c *Config) SetSuffix(suffix Suffix) {
 }
 
 func (c *Config) Validate() error {
+	switch strings.ToLower(c.Mode) {
+	case Direct:
+		return c.validateDirect()
+	default:
+		c.Mode = Indirect
+		return c.validateIndirect()
+	}
+	return nil
+}
+
+func (c *Config) validateIndirect() error {
 	if c.Dest == "" {
 		return errors.Errorf("Dest was empty")
 	}
@@ -49,6 +65,36 @@ func (c *Config) Validate() error {
 	}
 	if c.Connection == nil {
 		return errors.Errorf("Connection was empty")
+	}
+	if c.Connection.Driver == "" {
+		return errors.Errorf("Driver was empty")
+	}
+	if c.Connection.Dsn == "" {
+		return errors.Errorf("Dsn was empty")
+	}
+	if c.CreateDDLURL != "" {
+		fs := afs.New()
+		data, err := fs.DownloadWithURL(context.Background(), c.CreateDDLURL)
+		if err != nil {
+			return fmt.Errorf("error when read  CreateDDLURL %v", c.CreateDDLURL)
+		}
+		c.CreateDDL = string(data)
+	}
+	return nil
+}
+
+func (c *Config) validateDirect() error {
+	if c.Dest == "" {
+		return errors.Errorf("Dest was empty")
+	}
+	if c.JournalTable == "" {
+		return errors.Errorf("JournalTable was empty")
+	}
+	if c.Connection == nil {
+		return errors.Errorf("Connection was empty")
+	}
+	if c.ConnectionJn == nil {
+		c.ConnectionJn = c.Connection
 	}
 	if c.Connection.Driver == "" {
 		return errors.Errorf("Driver was empty")

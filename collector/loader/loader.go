@@ -3,5 +3,5 @@ package loader
 import "context"
 
 type Loader interface {
-	Load(ctx context.Context, data interface{}, batchID string) error
+	Load(ctx context.Context, data interface{}, batchID string, options ...Option) error
 }

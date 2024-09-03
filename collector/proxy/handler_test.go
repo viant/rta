@@ -129,7 +129,7 @@ func TestHandler_Handle(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		handler := NewHandler(testCase.collector, reflect.TypeOf(records{}))
+		handler := NewHandler(reflect.TypeOf(records{}), testCase.collector)
 		err := handler.Handle([]byte(testCase.data))
 		if !assert.Nil(t, err, testCase.description) {
 			continue

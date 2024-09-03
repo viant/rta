@@ -21,6 +21,11 @@ type Config struct {
 	Concurrency    int
 	Batch          *Batch
 	Retry          *Retry
+	StreamDisabled bool
+}
+
+func (c *Config) IsStreamEnabled() bool {
+	return !c.StreamDisabled
 }
 
 type Retry struct {

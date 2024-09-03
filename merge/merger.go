@@ -95,25 +95,28 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 	tx, err := db.Begin()
 	if err != nil {
 		stats.Append(err)
+		if s.config.Debug {
+			fmt.Printf("fail merge table %v due to: %v\n", jn.TempTableName, err)
+		}
 		return err
 	}
 	if err = s.mergeToDestTable(ctx, jn, tx, product); err != nil {
 		_ = tx.Rollback()
 		stats.Append(err)
 		if s.config.Debug {
-			fmt.Printf("fail merge table %v\n", jn.TempTableName)
+			fmt.Printf("fail merge table %v due to: %v\n", jn.TempTableName, err)
 		}
 		return err
 	}
 	if s.config.Debug {
-		fmt.Printf("success merge  table %v\n", jn.TempTableName)
+		fmt.Printf("success merge table %v\n", jn.TempTableName)
 	}
 
 	if err = s.updateJournal(ctx, db, jn, tx); err != nil {
 		_ = tx.Rollback()
 		stats.Append(err)
 		if s.config.Debug {
-			fmt.Printf("fail update table %v\n", jn.TempTableName)
+			fmt.Printf("fail update table %v due to: %v\n", jn.TempTableName, err)
 		}
 		return err
 	}
@@ -125,7 +128,7 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 	if err = tx.Commit(); err != nil {
 		stats.Append(err)
 		if s.config.Debug {
-			fmt.Printf("fail commit table %v\n", jn.TempTableName)
+			fmt.Printf("fail commit table %v due to: %v\n", jn.TempTableName, err)
 		}
 		return err
 	}
@@ -136,6 +139,9 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 
 	if _, err = db.ExecContext(ctx, "DROP TABLE "+jn.TempTableName); err != nil {
 		stats.Append(err)
+		if s.config.Debug {
+			fmt.Printf("fail drop table %v due to: %v\n", jn.TempTableName, err)
+		}
 		return err
 	}
 

@@ -4,7 +4,8 @@ import "time"
 
 type (
 	Config struct {
-		Endpoint Endpoint
+		Endpoint      Endpoint
+		MaxCollectors int
 	}
 
 	Endpoint struct {

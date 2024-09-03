@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/domain"
 	"github.com/viant/rta/load/config"
 	"github.com/viant/rta/shared"
 	"github.com/viant/sqlx/io/insert"
 	"github.com/viant/sqlx/io/load"
 	"github.com/viant/sqlx/io/read"
+	"github.com/viant/sqlx/loption"
 	"github.com/viant/sqlx/metadata/info/dialect"
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/option"
@@ -24,13 +26,23 @@ type Service struct {
 	suffix       config.Suffix
 }
 
-func (s *Service) Load(ctx context.Context, data interface{}, batchID string) error {
+func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
+	switch s.config.Mode {
+	case config.Direct:
+		return s.loadDirect(ctx, data, batchID, options...)
+	default:
+		return s.loadIndirect(ctx, data, batchID, options...)
+	}
+}
+
+func (s *Service) loadIndirect(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
 	db, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID)
+	collectorId := loader.NewOptions(options...).GetInstanceId()
+	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID, collectorId)
 	if err != nil {
 		return err
 	}
@@ -80,7 +92,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 	return count > 0, err
 }
 
-func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string) (bool, string, error) {
+func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string, collectorId string) (bool, string, error) {
 	exist, err := s.checkRecordExistInJounral(ctx, db, batchID)
 	if err != nil {
 		return false, "", err
@@ -88,7 +100,13 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	if exist {
 		return true, "", nil
 	}
-	sourceTable := s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
+
+	var sourceTable string
+	if collectorId != "" {
+		sourceTable = s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()() + "_" + collectorId
+	} else {
+		sourceTable = s.config.TransientTable() + "_" + s.suffixHostIp + "_" + s.config.Suffix()()
+	}
 
 	DDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v AS SELECT * FROM %v WHERE 1=0", sourceTable, s.config.Dest)
 	if s.config.CreateDDL != "" {
@@ -110,7 +128,7 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	if err != nil {
 		return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
 	}
-	_, err = loadFn(ctx, data, db)
+	_, err = loadFn(ctx, data, WithDb(db))
 	if err != nil {
 		err = fmt.Errorf("failed to load data into %v, %w", sourceTable, err)
 	}
@@ -123,8 +141,9 @@ func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (L
 		if err != nil {
 			return nil, fmt.Errorf("failed to create insert service: %w", err)
 		}
-		return func(ctx context.Context, any interface{}, options ...option.Option) (int, error) {
-			affected, _, err := srv.Exec(ctx, any, options...)
+		return func(ctx context.Context, any interface{}, opts ...Option) (int, error) {
+			options := newOptions(opts)
+			affected, _, err := srv.Exec(ctx, any, options.db)
 			return int(affected), err
 		}, nil
 	}
@@ -132,7 +151,10 @@ func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (L
 	if err != nil {
 		return nil, fmt.Errorf("failed to create load service: %w", err)
 	}
-	return srv.Exec, nil
+	return func(ctx context.Context, any interface{}, opts ...Option) (int, error) {
+		options := newOptions(opts)
+		return srv.Exec(ctx, any, loption.WithCommonOptions([]option.Option{options.db}))
+	}, nil
 }
 
 func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable string, tx *sql.Tx, batchID string) error {

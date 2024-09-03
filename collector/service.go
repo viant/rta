@@ -16,16 +16,21 @@ import (
 	loader2 "github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/shared"
 	"github.com/viant/tapper/io"
-	"reflect"
-	"sync/atomic"
-	"time"
-
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/msg"
 	tjson "github.com/viant/tapper/msg/json"
 	"log"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
+)
+
+const (
+	trashDirPrefix    = "CHECK_ME_BEFORE_DELETE_"
+	trashDirSuffixFmt = "20060102_150405"
 )
 
 type Service struct {
@@ -40,31 +45,36 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	flushCounter        *gmetric.Operation
-	retryCounter        *gmetric.Operation
-	loadMux             sync.Mutex
-	pendingRetry        int32
-	notificationCounter int32
-	closed              int32
+	flushCounter  *gmetric.Operation
+	retryCounter  *gmetric.Operation
+	loadMux       sync.Mutex
+	pendingRetry  int32
+	notifyPending chan bool
+	metrics       *gmetric.Service
+	options       []Option
+	instanceId    string
 }
 
 func (s *Service) NotifyWatcher() {
-	atomic.AddInt32(&s.notificationCounter, 1)
+	select {
+	case s.notifyPending <- true:
+	default:
+	}
 }
 
 func (s *Service) watchInBackground() {
-	sleepTime := 100 * time.Millisecond
-	for !s.IsClosed() {
-		count := atomic.LoadInt32(&s.notificationCounter)
-		if count == 0 {
-			time.Sleep(sleepTime)
-			continue
-		}
-		atomic.AddInt32(&s.notificationCounter, -1)
+	sleepTime := time.Second
+	if s.config.Batch != nil {
+		sleepTime = s.config.Batch.MaxDuration()
+	}
+
+	for <-s.notifyPending {
 		b, err := s.getBatch()
+
 		if err != nil {
 			log.Println(err)
 		}
+
 		if b != nil && atomic.LoadUint32(&b.flushed) == 0 && b.Accumulator.Len() > 0 {
 			time.Sleep(sleepTime)
 			s.NotifyWatcher()
@@ -72,16 +82,18 @@ func (s *Service) watchInBackground() {
 	}
 }
 
-func (s *Service) IsClosed() bool {
-	return atomic.LoadInt32(&s.closed) == 1
-}
-
 func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 	if !atomic.CompareAndSwapInt32(&s.pendingRetry, 0, 1) {
 		return nil
 	}
 
-	toRetry, err := s.loadFailedBatches(ctx, onStartUp)
+	streamURLSymLinkTrg := NewOptions(s.options...).GetStreamURLSymLinkTrg()
+	streamURLSymLinkTrgBase := ""
+	if streamURLSymLinkTrg != "" {
+		streamURLSymLinkTrgBase, _ = url.Split(streamURLSymLinkTrg, file.Scheme)
+	}
+
+	toRetry, err := s.loadFailedBatches(ctx, onStartUp, streamURLSymLinkTrgBase)
 	if len(toRetry) == 0 {
 		atomic.StoreInt32(&s.pendingRetry, 0)
 		return err
@@ -101,7 +113,7 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 		go func(URL string) {
 			defer wg.Done()
 			rateLimiter <- true
-			if err := s.replayBatch(ctx, URL); err != nil {
+			if err := s.replayBatch(ctx, URL, streamURLSymLinkTrgBase); err != nil {
 				errors.Add(err)
 			}
 			<-rateLimiter
@@ -112,7 +124,7 @@ func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
 	return errors.First()
 }
 
-func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]string, error) {
+func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool, streamURLSymLinkBase string) ([]string, error) {
 	URL := url.Normalize(s.config.Stream.URL, file.Scheme)
 	parentURL, _ := url.Split(URL, file.Scheme)
 	objects, err := s.fs.List(ctx, parentURL)
@@ -129,6 +141,10 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool) ([]stri
 		if strings.HasSuffix(candidate.URL(), shared.PendingSuffix) {
 			if onStartUp {
 				_ = s.fs.Delete(ctx, candidate.URL())
+				if streamURLSymLinkBase != "" {
+					aFile := url.Join(streamURLSymLinkBase, candidate.Name())
+					_ = s.fs.Delete(ctx, aFile)
+				}
 				continue
 			}
 			pending[candidate.URL()] = true
@@ -156,7 +172,7 @@ func (s *Service) getBatch() (*Batch, error) {
 			return b, err
 		}
 	}
-	batch, err := NewBatch(s.config.Stream, s.fs)
+	batch, err := NewBatch(s.config.Stream, s.fs, s.options...)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +199,15 @@ func (s *Service) Collect(record interface{}) error {
 	}
 	data := batch.Accumulator
 	s.reduce(data, record)
+	if s.config.IsStreamEnabled() {
+		err = s.backupLogEntry(record, batch)
+	}
+	_, err = s.flushIfNeed(batch)
+	s.NotifyWatcher()
+	return err
+}
+
+func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 	message := s.Provider.NewMessage()
 
 	enc, ok := record.(io.Encoder)
@@ -195,13 +220,11 @@ func (s *Service) Collect(record interface{}) error {
 	}
 
 	enc.Encode(message)
-	if err = batch.logger.Log(message); err != nil {
+	if err := batch.logger.Log(message); err != nil {
 		return err
 	}
 	message.Free()
-	_, err = s.flushIfNeed(batch)
-	s.NotifyWatcher()
-	return err
+	return nil
 }
 
 func (s *Service) Close() error {
@@ -216,7 +239,6 @@ func (s *Service) Close() error {
 	if err != nil {
 		log.Println(err)
 	}
-	atomic.AddInt32(&s.closed, 1)
 	return err
 }
 
@@ -248,13 +270,13 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
-	if atomic.LoadUint32(&batch.flushed) == 1 {
-		return nil
-	}
 	batch.Mutex.Lock()
 	defer func() {
 		batch.Mutex.Unlock()
 	}()
+	if atomic.LoadUint32(&batch.flushed) == 1 {
+		return nil
+	}
 
 	stats := stat.New()
 	if s.flushCounter != nil {
@@ -266,12 +288,16 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 		}()
 	}
 	batch.logger.Close()
-	data := s.mapperFn(batch.Accumulator)
 
 	var allErrors []error
-	loadErr := s.load(context.Background(), data, batch.ID)
+	var loadErr error
 
-	// In cause of load err delete pending file but not stream file
+	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
+	if batch.Accumulator.Len() != 0 {
+		data := s.mapperFn(batch.Accumulator)
+		loadErr = s.load(context.Background(), data, batch.ID)
+	}
+
 	if loadErr != nil {
 		stats.Append(loadErr)
 		allErrors = append(allErrors, loadErr)
@@ -282,6 +308,15 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 		allErrors = append(allErrors, err2)
 	}
 
+	if batch.pendingURLSymLink != "" {
+		err2b := s.fs.Delete(context.Background(), batch.pendingURLSymLink)
+		if err2b != nil {
+			stats.Append(err2b)
+			allErrors = append(allErrors, err2b)
+		}
+	}
+
+	// In cause of load err delete just pending file but not stream file
 	if loadErr != nil {
 		return s.joinErrors(allErrors)
 	}
@@ -289,6 +324,14 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	if err3 := s.fs.Delete(context.Background(), batch.Stream.URL); err3 != nil {
 		stats.Append(err3)
 		allErrors = append(allErrors, err3)
+	}
+
+	if batch.streamURLSymLink != "" {
+		err3b := s.fs.Delete(context.Background(), batch.streamURLSymLink)
+		if err3b != nil {
+			stats.Append(err3b)
+			allErrors = append(allErrors, err3b)
+		}
 	}
 
 	err := s.joinErrors(allErrors)
@@ -310,7 +353,7 @@ func (s *Service) joinErrors(allErrors []error) error {
 	return err
 }
 
-func (s *Service) replayBatch(ctx context.Context, URL string) error {
+func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLTrgBase string) error {
 
 	stats := stat.New()
 	if s.retryCounter != nil {
@@ -351,20 +394,38 @@ func (s *Service) replayBatch(ctx context.Context, URL string) error {
 	}
 	batchID := shared.BatchID(URL)
 	data := s.mapperFn(acc)
-	err = s.load(ctx, data, batchID)
-	if err != nil {
+
+	var loadErr error
+	if acc.Len() != 0 {
+		loadErr = s.load(ctx, data, batchID)
+	}
+	log.Printf("replaybatch - processed: %v, failed: %v\n", processed, failed)
+	if loadErr != nil {
+		stats.Append(loadErr)
+		return nil // avoid deleting files
+	}
+
+	// delete regular file
+	if symLinkStreamURLTrgBase != "" {
+		_, fileName := url.Split(URL, file.Scheme)
+		aFile := url.Join(symLinkStreamURLTrgBase, fileName)
+		err = s.fs.Delete(ctx, aFile)
+		if err != nil {
+			stats.Append(err)
+		}
+	}
+
+	// delete regular file or symlink
+	if err := s.fs.Delete(ctx, URL); err != nil {
 		stats.Append(err)
 	}
-	fmt.Printf("processed: %v, failed: %v\n", processed, failed)
-	if err == nil {
-		_ = s.fs.Delete(ctx, URL)
-	}
+
 	return nil
 }
 
 func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
 	s.loadMux.Lock()
-	err := s.loader.Load(ctx, data, batchID)
+	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId))
 	go func() {
 		time.Sleep(2 * time.Microsecond)
 		s.loadMux.Unlock()
@@ -377,16 +438,20 @@ func New(config *config.Config,
 	key func(record interface{}) interface{},
 	reducer func(key, source interface{}),
 	mapper func(accumulator *Accumulator) interface{},
-	loader loader2.Loader, metrics *gmetric.Service) (*Service, error) {
+	loader loader2.Loader, metrics *gmetric.Service, options ...Option) (*Service, error) {
 	srv := &Service{
-		config:    config,
-		fs:        afs.New(),
-		keyFn:     key,
-		newRecord: newRecord,
-		reducerFn: reducer,
-		mapperFn:  mapper,
-		loader:    loader,
-		Provider:  msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		config:        config,
+		fs:            afs.New(),
+		keyFn:         key,
+		newRecord:     newRecord,
+		reducerFn:     reducer,
+		mapperFn:      mapper,
+		notifyPending: make(chan bool, 1),
+		loader:        loader,
+		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		metrics:       metrics,
+		options:       options,
+		instanceId:    NewOptions(options...).GetInstanceId(),
 	}
 
 	if metrics != nil {
@@ -399,4 +464,88 @@ func New(config *config.Config,
 		go srv.watchInBackground()
 	}
 	return srv, err
+}
+
+// copy service configuration
+func prepareConfig(cfg *config.Config, position int) *config.Config {
+	result := *cfg
+	result.ID = result.ID + strconv.Itoa(position)
+	if result.Stream == nil {
+		return &result
+	}
+
+	stream := *cfg.Stream
+	result.Stream = &stream
+	index := strings.LastIndex(result.Stream.URL, "/")
+	if index > -1 {
+		result.Stream.URL = result.Stream.URL[:index] + "/" + strconv.Itoa(position) + "/" + result.Stream.URL[index+1:]
+	}
+
+	return &result
+}
+
+func (s *Service) addStreamSubfolder() *config.Config {
+	result := *s.config
+	return &result
+}
+
+func NewCollectors(config *config.Config,
+	newRecord func() interface{},
+	key func(record interface{}) interface{},
+	reducer func(key, source interface{}),
+	mapper func(accumulator *Accumulator) interface{},
+	loader loader2.Loader, metrics *gmetric.Service, count int) ([]*Service, []Collector, error) {
+
+	if count == 0 {
+		count = 1
+	}
+
+	fs := afs.New()
+	URL := url.Normalize(config.Stream.URL, file.Scheme)
+	parentURL, _ := url.Split(URL, file.Scheme)
+	exists, err := fs.Exists(context.Background(), parentURL, file.DefaultDirOsMode, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !exists {
+		return nil, nil, fmt.Errorf("newcollectors: folder %v does not exists", parentURL)
+	}
+
+	result := make([]*Service, count)
+
+	err = prepareRetryOnStartUpWithLink(fs, count, config)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch count {
+	case 1:
+		result[0], err = New(config, newRecord, key, reducer, mapper, loader, metrics)
+		if err != nil {
+			return nil, nil, err
+		}
+	default:
+		for i := 0; i < count; i++ {
+			aConfig := prepareConfig(config, i)
+			err = ensureParentDir(aConfig, fs)
+			result[i], err = New(aConfig, newRecord, key, reducer, mapper, loader, metrics, WithStreamURLSymLinkTrg(URL), WithInstanceId(strconv.Itoa(i)))
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	iCollectors := make([]Collector, len(result))
+	for i, c := range result {
+		iCollectors[i] = c
+	}
+
+	return result, iCollectors, nil
+}
+
+func ensureParentDir(aConfig *config.Config, fs afs.Service) error {
+	URL := url.Normalize(aConfig.Stream.URL, file.Scheme)
+	parentURL, _ := url.Split(URL, file.Scheme)
+	return ensureDir(fs, parentURL)
 }
