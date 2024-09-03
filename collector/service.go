@@ -45,32 +45,31 @@ type Service struct {
 	mux         sync.Mutex
 	encProvider *encoder.Provider
 	*msg.Provider
-	flushCounter  *gmetric.Operation
-	retryCounter  *gmetric.Operation
-	loadMux       sync.Mutex
-	pendingRetry  int32
-	notifyPending chan bool
-	metrics       *gmetric.Service
-	options       []Option
-	instanceId    string
+	flushCounter        *gmetric.Operation
+	retryCounter        *gmetric.Operation
+	loadMux             sync.Mutex
+	pendingRetry        int32
+	notificationCounter int32
+	metrics             *gmetric.Service
+	options             []Option
+	instanceId          string
+	closed              int32
 }
 
 func (s *Service) NotifyWatcher() {
-	select {
-	case s.notifyPending <- true:
-	default:
-	}
+	atomic.StoreInt32(&s.notificationCounter, 1)
 }
 
 func (s *Service) watchInBackground() {
-	sleepTime := time.Second
-	if s.config.Batch != nil {
-		sleepTime = s.config.Batch.MaxDuration()
-	}
-
-	for <-s.notifyPending {
+	sleepTime := 100 * time.Millisecond
+	for s.IsUp() {
+		counter := atomic.LoadInt32(&s.notificationCounter)
+		if counter == 0 {
+			time.Sleep(sleepTime)
+			continue
+		}
+		atomic.AddInt32(&s.notificationCounter, -1)
 		b, err := s.getBatch()
-
 		if err != nil {
 			log.Println(err)
 		}
@@ -239,6 +238,7 @@ func (s *Service) Close() error {
 	if err != nil {
 		log.Println(err)
 	}
+	atomic.AddInt32(&s.closed, 1)
 	return err
 }
 
@@ -440,18 +440,17 @@ func New(config *config.Config,
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service, options ...Option) (*Service, error) {
 	srv := &Service{
-		config:        config,
-		fs:            afs.New(),
-		keyFn:         key,
-		newRecord:     newRecord,
-		reducerFn:     reducer,
-		mapperFn:      mapper,
-		notifyPending: make(chan bool, 1),
-		loader:        loader,
-		Provider:      msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
-		metrics:       metrics,
-		options:       options,
-		instanceId:    NewOptions(options...).GetInstanceId(),
+		config:     config,
+		fs:         afs.New(),
+		keyFn:      key,
+		newRecord:  newRecord,
+		reducerFn:  reducer,
+		mapperFn:   mapper,
+		loader:     loader,
+		Provider:   msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		metrics:    metrics,
+		options:    options,
+		instanceId: NewOptions(options...).GetInstanceId(),
 	}
 
 	if metrics != nil {
@@ -487,6 +486,10 @@ func prepareConfig(cfg *config.Config, position int) *config.Config {
 func (s *Service) addStreamSubfolder() *config.Config {
 	result := *s.config
 	return &result
+}
+
+func (s *Service) IsUp() bool {
+	return atomic.LoadInt32(&s.closed) == 0
 }
 
 func NewCollectors(config *config.Config,
