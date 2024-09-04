@@ -25,11 +25,14 @@ func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID stri
 	}
 	defer db.Close()
 
-	dbJn, err := s.config.ConnectionJn.OpenDB(ctx)
-	if err != nil {
-		return err
+	var dbJn *sql.DB
+	if s.config.ConnectionJn != nil {
+		dbJn, err = s.config.ConnectionJn.OpenDB(ctx)
+		if err != nil {
+			return err
+		}
+		defer dbJn.Close()
 	}
-	defer dbJn.Close()
 
 	collectorId := loader.NewOptions(options...).GetInstanceId()
 	recordExist, tempTable, err := s.loadDirectToTable(ctx, data, db, dbJn, batchID, collectorId)
@@ -43,18 +46,21 @@ func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID stri
 	// TODO how to check if data was persisted before committing to journal?
 	// TODO how to rollback inserts if journal insert fails
 
-	tx, err := dbJn.Begin()
-	if err != nil {
-		return err
+	if dbJn != nil && s.config.JournalTable != "" {
+		tx, err := dbJn.Begin()
+		if err != nil {
+			return err
+		}
+		err = s.insertToJournalDirect(ctx, dbJn, tempTable, tx, batchID)
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to insert into journal table: %w", err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit - load/insert into journal table: %w", err)
+		}
 	}
-	err = s.insertToJournalDirect(ctx, dbJn, tempTable, tx, batchID)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("failed to insert into journal table: %w", err)
-	}
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit - load/insert into journal table: %w", err)
-	}
+
 	return nil
 }
 
@@ -82,17 +88,21 @@ func (s *Service) checkRecordExistInJounralDirect(ctx context.Context, db *sql.D
 }
 
 func (s *Service) loadDirectToTable(ctx context.Context, data interface{}, db *sql.DB, dbJn *sql.DB, batchID string, collectorId string) (bool, string, error) {
-	exist, err := s.checkRecordExistInJounralDirect(ctx, dbJn, batchID)
-	if err != nil {
-		return false, "", err
-	}
-	if exist {
-		return true, "", nil
-	}
+	var err error
 
+	if dbJn != nil && s.config.JournalTable != "" {
+		exist, err := s.checkRecordExistInJounralDirect(ctx, dbJn, batchID)
+		if err != nil {
+			return false, "", err
+		}
+		if exist {
+			return true, "", nil
+		}
+	}
 	var sourceTable = s.config.Dest
 
 	DDL := strings.TrimSpace(s.config.CreateDDL)
+	DDL = s.expandDDL(DDL)
 	if len(DDL) > 0 {
 		_, err = db.ExecContext(ctx, DDL)
 	}
@@ -156,4 +166,11 @@ func (s *Service) insertToJournalDirect(ctx context.Context, db *sql.DB, tempTab
 	}
 	_, _, err = insert.Exec(ctx, journal, tx, dialect.PresetIDStrategyIgnore)
 	return err
+}
+
+func (s *Service) expandDDL(ddl string) string {
+	if index := strings.Index(ddl, "${Dest}"); index != -1 {
+		return strings.ReplaceAll(ddl, "${Dest}", s.config.Dest)
+	}
+	return ddl
 }

@@ -13,8 +13,8 @@ require (
 	github.com/viant/assertly v0.9.1-0.20220620174148-bab013f93a60
 	github.com/viant/dsunit v0.10.10
 	github.com/viant/gmetric v0.2.7-0.20220509165352-32e81d5e5fd8
-	github.com/viant/scy v0.1.1-0.20220629173947-775b550f1578
-	github.com/viant/sqlx v0.15.2-0.20240830191051-5f6c7b1c1ef2
+	github.com/viant/scy v0.4.1
+	github.com/viant/sqlx v0.15.2-0.20240903224220-21b405794047
 	github.com/viant/tapper v0.6.4-0.20220622150849-b84262d38655
 	github.com/viant/toolbox v0.34.6-0.20221112031702-3e7cdde7f888
 	github.com/viant/xunsafe v0.9.2
@@ -32,6 +32,7 @@ require (
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/onsi/gomega v1.32.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/viant/cloudless v1.9.9-0.20240827182635-743c25b4e33c // indirect
 	github.com/viant/dsc v0.16.2 // indirect
 	github.com/viant/parsly v0.3.3-0.20240717150634-e1afaedb691b // indirect
 	github.com/viant/structology v0.5.6-0.20240802174922-5eb157550455 // indirect

@@ -82,6 +82,10 @@ func (s *Service) watchInBackground() {
 }
 
 func (s *Service) RetryFailed(ctx context.Context, onStartUp bool) error {
+	if s.config.StreamDisabled {
+		return nil
+	}
+
 	if !atomic.CompareAndSwapInt32(&s.pendingRetry, 0, 1) {
 		return nil
 	}
@@ -171,7 +175,7 @@ func (s *Service) getBatch() (*Batch, error) {
 			return b, err
 		}
 	}
-	batch, err := NewBatch(s.config.Stream, s.fs, s.options...)
+	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +291,10 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 			s.flushCounter.DecrementValue(stat.Pending)
 		}()
 	}
-	batch.logger.Close()
+
+	if batch.logger != nil {
+		batch.logger.Close()
+	}
 
 	var allErrors []error
 	var loadErr error
@@ -301,6 +308,10 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	if loadErr != nil {
 		stats.Append(loadErr)
 		allErrors = append(allErrors, loadErr)
+	}
+
+	if s.config.StreamDisabled {
+		return loadErr
 	}
 
 	if err2 := s.fs.Delete(context.Background(), batch.PendingURL); err2 != nil {

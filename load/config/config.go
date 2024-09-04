@@ -87,14 +87,8 @@ func (c *Config) validateDirect() error {
 	if c.Dest == "" {
 		return errors.Errorf("Dest was empty")
 	}
-	if c.JournalTable == "" {
-		return errors.Errorf("JournalTable was empty")
-	}
 	if c.Connection == nil {
 		return errors.Errorf("Connection was empty")
-	}
-	if c.ConnectionJn == nil {
-		c.ConnectionJn = c.Connection
 	}
 	if c.Connection.Driver == "" {
 		return errors.Errorf("Driver was empty")

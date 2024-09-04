@@ -65,13 +65,27 @@ func (b Batch) IsActive(batch *config.Batch) bool {
 	return toolbox.AsInt(b.Accumulator.Len()) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration()
 }
 
-func NewBatch(stream *tconfig.Stream, fs afs.Service, options ...Option) (*Batch, error) {
-
+func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...Option) (*Batch, error) {
 	UUID := uuid.New()
 
 	var URL string
 	var pendingURLSymLink string
 	var streamURLSymLink string
+	var pendingURL string
+
+	if disabled {
+		return &Batch{
+			PendingURL:        pendingURL,
+			ID:                UUID.String(),
+			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
+			Accumulator:       NewAccumulator(),
+			Started:           time.Now(),
+			Count:             0,
+			logger:            nil,
+			pendingURLSymLink: pendingURLSymLink,
+			streamURLSymLink:  streamURLSymLink,
+		}, nil
+	}
 
 	symLinkStreamURLTrg := NewOptions(options...).GetStreamURLSymLinkTrg()
 	switch symLinkStreamURLTrg {
@@ -82,7 +96,7 @@ func NewBatch(stream *tconfig.Stream, fs afs.Service, options ...Option) (*Batch
 	}
 
 	URL = URL + "_" + UUID.String()
-	pendingURL := URL + shared.PendingSuffix
+	pendingURL = URL + shared.PendingSuffix
 
 	batchSteam := &tconfig.Stream{
 		FlushMod: stream.FlushMod,
