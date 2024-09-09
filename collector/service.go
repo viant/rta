@@ -20,6 +20,7 @@ import (
 	"github.com/viant/tapper/msg"
 	tjson "github.com/viant/tapper/msg/json"
 	"log"
+	"math/rand"
 	"reflect"
 	"strconv"
 	"strings"
@@ -54,6 +55,8 @@ type Service struct {
 	options             []Option
 	instanceId          string
 	closed              int32
+	randGenerator       *rand.Rand
+	loadCount           int
 }
 
 func (s *Service) NotifyWatcher() {
@@ -436,12 +439,35 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 
 func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
 	s.loadMux.Lock()
+	delay := s.ensureLoadDelayIfNeeded()
+	if delay != time.Duration(0) {
+		time.Sleep(delay)
+	}
+
 	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId))
+	s.loadCount++
 	go func() {
 		time.Sleep(2 * time.Microsecond)
 		s.loadMux.Unlock()
 	}()
 	return err
+}
+
+func (s *Service) ensureLoadDelayIfNeeded() time.Duration {
+	if s.randGenerator == nil || s.config.LoadDelayMaxMs == 0 {
+		return time.Duration(0)
+	}
+
+	switch {
+	case s.config.LoadDelayOnlyOnce && s.loadCount == 0:
+	case !s.config.LoadDelayOnlyOnce && s.config.LoadDelayEveryNExec == 1:
+	case !s.config.LoadDelayOnlyOnce && s.config.LoadDelayEveryNExec > 0 && s.loadCount%s.config.LoadDelayEveryNExec == 0:
+	default:
+		return time.Duration(0)
+	}
+
+	loadDelay := s.randGenerator.Intn(s.config.LoadDelayMaxMs)
+	return time.Duration(loadDelay) * time.Millisecond
 }
 
 func New(config *config.Config,
@@ -462,6 +488,11 @@ func New(config *config.Config,
 		metrics:    metrics,
 		options:    options,
 		instanceId: NewOptions(options...).GetInstanceId(),
+	}
+
+	if config.LoadDelayMaxMs > 0 {
+		seed := time.Now().UnixNano() + int64(config.LoadDelaySeedPart)
+		srv.randGenerator = rand.New(rand.NewSource(seed))
 	}
 
 	if metrics != nil {

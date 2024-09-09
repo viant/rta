@@ -32,7 +32,6 @@ require (
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/onsi/gomega v1.32.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/viant/cloudless v1.9.9-0.20240827182635-743c25b4e33c // indirect
 	github.com/viant/dsc v0.16.2 // indirect
 	github.com/viant/parsly v0.3.3-0.20240717150634-e1afaedb691b // indirect
 	github.com/viant/structology v0.5.6-0.20240802174922-5eb157550455 // indirect

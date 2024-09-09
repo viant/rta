@@ -14,14 +14,18 @@ import (
 )
 
 type Config struct {
-	ID             string
-	Loader         *config.Config
-	Stream         *tconfig.Stream
-	MaxMessageSize int
-	Concurrency    int
-	Batch          *Batch
-	Retry          *Retry
-	StreamDisabled bool
+	ID                  string
+	Loader              *config.Config
+	Stream              *tconfig.Stream
+	MaxMessageSize      int
+	Concurrency         int
+	Batch               *Batch
+	Retry               *Retry
+	StreamDisabled      bool
+	LoadDelayMaxMs      int
+	LoadDelaySeedPart   int
+	LoadDelayEveryNExec int
+	LoadDelayOnlyOnce   bool
 }
 
 func (c *Config) IsStreamEnabled() bool {
