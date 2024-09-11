@@ -203,6 +203,10 @@ func (s *Service) Collect(record interface{}) error {
 	if err != nil {
 		return err
 	}
+	atomic.AddInt32(&batch.collecting, 1)
+	defer func() {
+		atomic.AddInt32(&batch.collecting, -1)
+	}()
 	data := batch.Accumulator
 	s.reduce(data, record)
 	if s.config.IsStreamEnabled() {
@@ -277,12 +281,18 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
+	atomic.StoreUint32(&batch.flushStarted, 1)
 	batch.Mutex.Lock()
-	defer func() {
-		batch.Mutex.Unlock()
-	}()
+	defer batch.Mutex.Unlock()
 	if atomic.LoadUint32(&batch.flushed) == 1 {
 		return nil
+	}
+
+	for i := 0; i < 100; i++ {
+		if atomic.LoadInt32(&batch.collecting) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	stats := stat.New()

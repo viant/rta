@@ -13,6 +13,7 @@ import (
 	"github.com/viant/toolbox"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,8 @@ type (
 		logger      *log.Logger
 		PendingURL  string
 		sync.Mutex
+		collecting        int32
+		flushStarted      uint32
 		flushed           uint32
 		pendingURLSymLink string
 		streamURLSymLink  string
@@ -61,8 +64,8 @@ func NewAccumulator() *Accumulator {
 	return &Accumulator{Map: map[interface{}]interface{}{}}
 }
 
-func (b Batch) IsActive(batch *config.Batch) bool {
-	return toolbox.AsInt(b.Accumulator.Len()) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration()
+func (b *Batch) IsActive(batch *config.Batch) bool {
+	return toolbox.AsInt(b.Accumulator.Len()) < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration() && atomic.LoadUint32(&b.flushStarted) == 0
 }
 
 func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...Option) (*Batch, error) {
