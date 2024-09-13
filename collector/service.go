@@ -65,21 +65,16 @@ func (s *Service) NotifyWatcher() {
 
 func (s *Service) watchInBackground() {
 	sleepTime := 100 * time.Millisecond
+
 	for s.IsUp() {
-		counter := atomic.LoadInt32(&s.notificationCounter)
-		if counter == 0 {
-			time.Sleep(sleepTime)
+		time.Sleep(sleepTime)
+		b := s.batch
+		if b == nil || b.IsActive(s.config.Batch) {
 			continue
 		}
-		atomic.AddInt32(&s.notificationCounter, -1)
-		b, err := s.getBatch()
-		if err != nil {
-			log.Println(err)
-		}
-
-		if b != nil && atomic.LoadUint32(&b.flushed) == 0 && b.Accumulator.Len() > 0 {
-			time.Sleep(sleepTime)
-			s.NotifyWatcher()
+		time.Sleep(100 * time.Millisecond) // extra time to minimize risk of using batch in Collect fn during flushing
+		if atomic.LoadUint32(&b.collecting) == 0 && b.Accumulator.Len() > 0 {
+			_, _ = s.flushIfNeed(b)
 		}
 	}
 }
@@ -170,15 +165,14 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool, streamU
 }
 
 func (s *Service) getBatch() (*Batch, error) {
-	s.mux.RLock()
 	batch := s.batch
-	s.mux.RUnlock()
 	if batch != nil {
 		b, err := s.flushIfNeed(batch)
 		if b != nil {
 			return b, err
 		}
 	}
+
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	if s.batch != nil && s.batch.IsActive(s.config.Batch) {
@@ -209,9 +203,9 @@ func (s *Service) Collect(record interface{}) error {
 	if err != nil {
 		return err
 	}
-	atomic.AddInt32(&batch.collecting, 1)
+	atomic.StoreUint32(&batch.collecting, 1)
 	defer func() {
-		atomic.AddInt32(&batch.collecting, -1)
+		atomic.StoreUint32(&batch.collecting, 0)
 	}()
 	data := batch.Accumulator
 	s.reduce(data, record)
@@ -219,7 +213,6 @@ func (s *Service) Collect(record interface{}) error {
 		err = s.backupLogEntry(record, batch)
 	}
 	_, err = s.flushIfNeed(batch)
-	s.NotifyWatcher()
 	return err
 }
 
@@ -287,15 +280,13 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 }
 
 func (s *Service) FlushInBackground(batch *Batch) error {
-	atomic.StoreUint32(&batch.flushStarted, 1)
-	batch.Mutex.Lock()
-	defer batch.Mutex.Unlock()
-	if atomic.LoadUint32(&batch.flushed) == 1 {
+	if !atomic.CompareAndSwapUint32(&batch.flushStarted, 0, 1) {
 		return nil
 	}
-
+	batch.Mutex.Lock()
+	defer batch.Mutex.Unlock()
 	for i := 0; i < 100; i++ {
-		if atomic.LoadInt32(&batch.collecting) == 0 {
+		if atomic.LoadUint32(&batch.collecting) == 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -365,9 +356,6 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 
 	err := s.joinErrors(allErrors)
-	if err == nil {
-		atomic.StoreUint32(&batch.flushed, 1)
-	}
 	return err
 }
 
