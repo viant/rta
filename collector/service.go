@@ -68,7 +68,9 @@ func (s *Service) watchInBackground() {
 
 	for s.IsUp() {
 		time.Sleep(sleepTime)
+		s.mux.RLock()
 		b := s.batch
+		s.mux.RUnlock()
 		if b == nil || b.IsActive(s.config.Batch) {
 			continue
 		}
@@ -165,7 +167,9 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool, streamU
 }
 
 func (s *Service) getBatch() (*Batch, error) {
+	s.mux.RLock()
 	batch := s.batch
+	s.mux.RUnlock()
 	if batch != nil {
 		b, err := s.flushIfNeed(batch)
 		if b != nil {
