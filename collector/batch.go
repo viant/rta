@@ -33,16 +33,14 @@ type (
 	}
 
 	Accumulator struct {
-		Map map[interface{}]interface{}
+		Map  map[interface{}]interface{}
+		size uint32
 		sync.RWMutex
 	}
 )
 
 func (a *Accumulator) Len() int {
-	a.RWMutex.RLock()
-	result := len(a.Map)
-	a.RWMutex.RUnlock()
-	return result
+	return int(atomic.LoadUint32(&a.size))
 }
 
 func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
@@ -55,11 +53,12 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 func (a *Accumulator) Put(key, value interface{}) {
 	a.RWMutex.Lock()
 	a.Map[key] = value
+	a.size = uint32(len(a.Map))
 	a.RWMutex.Unlock()
 }
 
 func NewAccumulator() *Accumulator {
-	return &Accumulator{Map: map[interface{}]interface{}{}}
+	return &Accumulator{Map: make(map[interface{}]interface{}, 1000)}
 }
 
 func (b *Batch) IsActive(batch *config.Batch) bool {
