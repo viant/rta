@@ -43,7 +43,7 @@ type Service struct {
 	mapperFn    func(acc *Accumulator) interface{}
 	loader      loader2.Loader
 	batch       *Batch
-	mux         sync.Mutex
+	mux         sync.RWMutex
 	encProvider *encoder.Provider
 	*msg.Provider
 	flushCounter        *gmetric.Operation
@@ -170,13 +170,19 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool, streamU
 }
 
 func (s *Service) getBatch() (*Batch, error) {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	if batch := s.batch; batch != nil {
+	s.mux.RLock()
+	batch := s.batch
+	s.mux.RUnlock()
+	if batch != nil {
 		b, err := s.flushIfNeed(batch)
 		if b != nil {
 			return b, err
 		}
+	}
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	if s.batch != nil && s.batch.IsActive(s.config.Batch) {
+		return s.batch, nil
 	}
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
