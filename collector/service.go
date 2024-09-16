@@ -65,7 +65,7 @@ func (s *Service) NotifyWatcher() {
 	atomic.StoreInt32(&s.notificationCounter, 1)
 }
 
-func (s *Service) watchInBackground() {
+func (s *Service) watchScheduledBatches() {
 	sleepTime := 100 * time.Millisecond
 	for s.IsUp() {
 		flushed, err := s.flushScheduledBatches()
@@ -166,27 +166,34 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool, streamU
 
 func (s *Service) getBatch() (*Batch, error) {
 	s.mux.RLock()
-	batch := s.batch
+	prevBatch := s.batch
 	s.mux.RUnlock()
-	if s.batch != nil && s.batch.IsActive(s.config.Batch) {
-		return s.batch, nil
+	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
+		return prevBatch, nil
 	}
 	s.mux.Lock()
-	if s.batch != nil && s.batch.IsActive(s.config.Batch) {
-		return s.batch, nil
+	prevBatch = s.batch
+	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
+		return prevBatch, nil
 	}
 
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
 		return nil, err
 	}
-	s.flushScheduled = append(s.flushScheduled, batch)
+	if prevBatch != nil {
+		s.flushScheduled = append(s.flushScheduled, prevBatch)
+	}
 	s.batch = batch
 	s.mux.Unlock()
-	return batch, nil
+	return prevBatch, nil
 }
 
 func (s *Service) Collect(record interface{}) error {
+	return s.CollectAll(record)
+}
+
+func (s *Service) CollectAll(records ...interface{}) error {
 	batch, err := s.getBatch()
 	if err != nil {
 		return err
@@ -195,10 +202,18 @@ func (s *Service) Collect(record interface{}) error {
 	defer func() {
 		atomic.AddUint32(&batch.collecting, -1)
 	}()
+	if atomic.LoadUint32(&batch.flushStarted) == 1 {
+		batch, err = s.getBatch()
+		if err != nil {
+			return err
+		}
+	}
 	data := batch.Accumulator
-	s.reduce(data, record)
-	if s.config.IsStreamEnabled() {
-		err = s.backupLogEntry(record, batch)
+	for i := range records {
+		s.reduce(data, records[i])
+		if s.config.IsStreamEnabled() {
+			err = s.backupLogEntry(records[i], batch)
+		}
 	}
 	return err
 }
@@ -500,7 +515,8 @@ func New(config *config.Config,
 
 	err := srv.RetryFailed(context.Background(), true)
 	if err == nil {
-		go srv.watchInBackground()
+		go srv.watchScheduledBatches()
+		go srv.watchActiveBatch()
 	}
 	return srv, err
 }
@@ -546,11 +562,32 @@ func (s *Service) flushScheduledBatches() (flushed bool, err error) {
 		return false, nil
 	}
 	s.mux.Lock()
+	defer s.mux.Unlock()
 	batch := s.flushScheduled[0]
+	if atomic.LoadUint32(&batch.collecting) == 1 {
+		return false, nil
+	}
 	s.flushScheduled = s.flushScheduled[1:]
-	s.mux.Unlock()
 	err = s.Flush(batch)
 	return true, err
+}
+
+func (s *Service) watchActiveBatch() {
+	sleepTime := 100 * time.Millisecond
+	for s.IsUp() {
+		s.mux.RLock()
+		batch := s.batch
+		s.mux.RUnlock()
+		if !batch.IsActive(s.config.Batch) && atomic.LoadUint32(&batch.collecting) == 0 {
+			s.mux.Lock()
+			s.flushScheduled = append(s.flushScheduled, batch)
+			s.batch = nil
+			s.mux.Unlock()
+		}
+
+		time.Sleep(sleepTime)
+	}
+
 }
 
 func NewCollectors(config *config.Config,
