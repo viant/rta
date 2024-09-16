@@ -27,7 +27,7 @@ type (
 		logger      *log.Logger
 		PendingURL  string
 		sync.Mutex
-		collecting        uint32
+		collecting        int32
 		flushStarted      uint32
 		pendingURLSymLink string
 		streamURLSymLink  string

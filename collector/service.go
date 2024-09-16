@@ -198,9 +198,9 @@ func (s *Service) CollectAll(records ...interface{}) error {
 	if err != nil {
 		return err
 	}
-	atomic.AddUint32(&batch.collecting, 1)
+	atomic.AddInt32(&batch.collecting, 1)
 	defer func() {
-		atomic.AddUint32(&batch.collecting, -1)
+		atomic.AddInt32(&batch.collecting, -1)
 	}()
 	if atomic.LoadUint32(&batch.flushStarted) == 1 {
 		batch, err = s.getBatch()
@@ -289,7 +289,7 @@ func (s *Service) Flush(batch *Batch) error {
 	batch.Mutex.Lock()
 	defer batch.Mutex.Unlock()
 	for i := 0; i < 100; i++ {
-		if atomic.LoadUint32(&batch.collecting) == 0 {
+		if atomic.LoadInt32(&batch.collecting) == 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -564,7 +564,7 @@ func (s *Service) flushScheduledBatches() (flushed bool, err error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	batch := s.flushScheduled[0]
-	if atomic.LoadUint32(&batch.collecting) == 1 {
+	if atomic.LoadInt32(&batch.collecting) == 1 {
 		return false, nil
 	}
 	s.flushScheduled = s.flushScheduled[1:]
@@ -578,7 +578,7 @@ func (s *Service) watchActiveBatch() {
 		s.mux.RLock()
 		batch := s.batch
 		s.mux.RUnlock()
-		if !batch.IsActive(s.config.Batch) && atomic.LoadUint32(&batch.collecting) == 0 {
+		if !batch.IsActive(s.config.Batch) && atomic.LoadInt32(&batch.collecting) == 0 {
 			s.mux.Lock()
 			s.flushScheduled = append(s.flushScheduled, batch)
 			s.batch = nil
