@@ -172,6 +172,7 @@ func (s *Service) getBatch() (*Batch, error) {
 		return prevBatch, nil
 	}
 	s.mux.Lock()
+	defer s.mux.Unlock()
 	prevBatch = s.batch
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
 		return prevBatch, nil
@@ -185,8 +186,8 @@ func (s *Service) getBatch() (*Batch, error) {
 		s.flushScheduled = append(s.flushScheduled, prevBatch)
 	}
 	s.batch = batch
-	s.mux.Unlock()
-	return prevBatch, nil
+
+	return batch, nil
 }
 
 func (s *Service) Collect(record interface{}) error {
@@ -578,6 +579,11 @@ func (s *Service) watchActiveBatch() {
 		s.mux.RLock()
 		batch := s.batch
 		s.mux.RUnlock()
+		if batch == nil {
+			time.Sleep(sleepTime)
+			continue
+		}
+
 		if !batch.IsActive(s.config.Batch) && atomic.LoadInt32(&batch.collecting) == 0 {
 			s.mux.Lock()
 			s.flushScheduled = append(s.flushScheduled, batch)
