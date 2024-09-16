@@ -35,7 +35,7 @@ type (
 
 	Accumulator struct {
 		Map        map[interface{}]interface{}
-		useFastMap bool
+		UseFastMap bool
 		FastMap    *fmap.FastMap[any]
 		size       uint32
 		sync.RWMutex
@@ -50,7 +50,7 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 	a.RWMutex.RLock()
 	var data interface{}
 	var ok bool
-	if a.useFastMap {
+	if a.UseFastMap {
 		data, ok = a.FastMap.Get(int64(key.(int)))
 	} else {
 		data, ok = a.Map[key]
@@ -61,7 +61,7 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 
 func (a *Accumulator) Put(key, value interface{}) {
 	a.RWMutex.Lock()
-	if a.useFastMap {
+	if a.UseFastMap {
 		a.FastMap.Put(int64(key.(int)), value)
 		a.RWMutex.Unlock()
 		atomic.StoreUint32(&a.size, uint32(a.FastMap.Size()))
@@ -78,7 +78,7 @@ func NewAccumulator(fastMap *FMapPool) *Accumulator {
 	if useFastMap {
 		fMap = fastMap.Get()
 	}
-	ret := &Accumulator{useFastMap: useFastMap, FastMap: fMap}
+	ret := &Accumulator{UseFastMap: useFastMap, FastMap: fMap}
 	if !useFastMap {
 		ret.Map = make(map[interface{}]interface{}, 100)
 	}

@@ -44,10 +44,10 @@ func BenchmarkService_FmapCollect(b *testing.B) {
 		Loader:         &lconfig.Config{},
 		Stream:         &tconfig.Stream{},
 		StreamDisabled: true,
-		FastMapSize:    100000,
+		FastMapSize:    20000,
 		UseFastMap:     true,
 		Batch: &config.Batch{
-			MaxElements:   100,
+			MaxElements:   10000,
 			MaxDurationMs: int(time.Minute.Milliseconds()),
 		},
 	}
@@ -64,7 +64,7 @@ func BenchmarkService_Collect(b *testing.B) {
 		Stream:         &tconfig.Stream{},
 		StreamDisabled: true,
 		Batch: &config.Batch{
-			MaxElements:   1000,
+			MaxElements:   10000,
 			MaxDurationMs: int(time.Minute.Milliseconds()),
 		},
 	}
@@ -81,21 +81,23 @@ func runBench(b *testing.B, cfg config.Config) {
 	}
 
 	srv, err := New(&cfg, newRecordFn, keyFn, reducerFn, mapperFn, loader, nil)
-	assert.Nil(b, err)
-	for j := 0; j < b.N; j++ {
-		for i := 0; i < 1000000; i++ {
-			inventory := Inventory{
-				ProductID: i,
-				Name:      "test name",
-				Quantity:  10,
-				Price:     1.55,
-				Updated:   &new,
-			}
-			err := srv.Collect(&inventory)
-			assert.Nil(b, err)
+	b.RunParallel(func(pb *testing.PB) {
+		assert.Nil(b, err)
+		for pb.Next() {
+			for i := 0; i < 500000; i++ {
+				inventory := Inventory{
+					ProductID: i,
+					Name:      "test name",
+					Quantity:  10,
+					Price:     1.55,
+					Updated:   &new,
+				}
+				err := srv.Collect(&inventory)
+				assert.Nil(b, err)
 
+			}
 		}
-	}
+	})
 	srv.Close()
 }
 
@@ -248,6 +250,16 @@ func mapperFn(accumulator *Accumulator) interface{} {
 	i := 0
 	accumulator.Lock()
 	defer accumulator.Unlock()
+	if accumulator.UseFastMap {
+		idx := 0
+		hasFreeVal := false
+		for i := 0; i < accumulator.FastMap.Size(); i++ {
+			_, v, _ := accumulator.FastMap.Value(&idx, &hasFreeVal)
+			result[i] = v.(*Inventory)
+		}
+		return result
+	}
+
 	for _, v := range accumulator.Map {
 		result[i] = v.(*Inventory)
 		i++
