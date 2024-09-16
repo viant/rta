@@ -35,16 +35,17 @@ const (
 )
 
 type Service struct {
-	config      *config.Config
-	fs          afs.Service
-	newRecord   func() interface{}
-	keyFn       func(record interface{}) interface{}
-	reducerFn   func(accumulator, source interface{})
-	mapperFn    func(acc *Accumulator) interface{}
-	loader      loader2.Loader
-	batch       *Batch
-	mux         sync.RWMutex
-	encProvider *encoder.Provider
+	config         *config.Config
+	fs             afs.Service
+	newRecord      func() interface{}
+	keyFn          func(record interface{}) interface{}
+	reducerFn      func(accumulator, source interface{})
+	mapperFn       func(acc *Accumulator) interface{}
+	loader         loader2.Loader
+	batch          *Batch
+	flushScheduled []*Batch
+	mux            sync.RWMutex
+	encProvider    *encoder.Provider
 	*msg.Provider
 	flushCounter        *gmetric.Operation
 	retryCounter        *gmetric.Operation
@@ -66,19 +67,15 @@ func (s *Service) NotifyWatcher() {
 
 func (s *Service) watchInBackground() {
 	sleepTime := 100 * time.Millisecond
-
 	for s.IsUp() {
-		time.Sleep(sleepTime)
-		s.mux.RLock()
-		b := s.batch
-		s.mux.RUnlock()
-		if b == nil || b.IsActive(s.config.Batch) {
+		flushed, err := s.flushScheduledBatches()
+		if err != nil {
+			log.Println(err)
+		}
+		if flushed {
 			continue
 		}
-		time.Sleep(100 * time.Millisecond) // extra time to minimize risk of using batch in Collect fn during flushing
-		if atomic.LoadUint32(&b.collecting) == 0 && b.Accumulator.Len() > 0 {
-			_, _ = s.flushIfNeed(b)
-		}
+		time.Sleep(sleepTime)
 	}
 }
 
@@ -171,36 +168,22 @@ func (s *Service) getBatch() (*Batch, error) {
 	s.mux.RLock()
 	batch := s.batch
 	s.mux.RUnlock()
-	if batch != nil {
-		b, err := s.flushIfNeed(batch)
-		if b != nil {
-			return b, err
-		}
-	}
-
-	s.mux.Lock()
-	defer s.mux.Unlock()
 	if s.batch != nil && s.batch.IsActive(s.config.Batch) {
 		return s.batch, nil
 	}
+	s.mux.Lock()
+	if s.batch != nil && s.batch.IsActive(s.config.Batch) {
+		return s.batch, nil
+	}
+
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
 		return nil, err
 	}
+	s.flushScheduled = append(s.flushScheduled, batch)
 	s.batch = batch
+	s.mux.Unlock()
 	return batch, nil
-}
-
-func (s *Service) flushIfNeed(batch *Batch) (*Batch, error) {
-	if batch.IsActive(s.config.Batch) {
-		return batch, nil
-	}
-	go func() {
-		if err := s.FlushInBackground(batch); err != nil {
-			log.Println(err)
-		}
-	}()
-	return nil, nil
 }
 
 func (s *Service) Collect(record interface{}) error {
@@ -217,7 +200,6 @@ func (s *Service) Collect(record interface{}) error {
 	if s.config.IsStreamEnabled() {
 		err = s.backupLogEntry(record, batch)
 	}
-	_, err = s.flushIfNeed(batch)
 	return err
 }
 
@@ -250,7 +232,7 @@ func (s *Service) Close() error {
 		return nil
 	}
 	atomic.AddInt32(&s.closed, 1)
-	err := s.FlushInBackground(batch)
+	err := s.Flush(batch)
 	if err != nil {
 		log.Println(err)
 	}
@@ -285,7 +267,7 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 	s.reducerFn(accumulator, record)
 }
 
-func (s *Service) FlushInBackground(batch *Batch) error {
+func (s *Service) Flush(batch *Batch) error {
 	if !atomic.CompareAndSwapUint32(&batch.flushStarted, 0, 1) {
 		return nil
 	}
@@ -307,11 +289,9 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 			s.flushCounter.DecrementValue(stat.Pending)
 		}()
 	}
-
 	if batch.logger != nil {
 		batch.logger.Close()
 	}
-
 	var allErrors []error
 	var loadErr error
 
@@ -550,6 +530,27 @@ func (s *Service) addStreamSubfolder() *config.Config {
 
 func (s *Service) IsUp() bool {
 	return atomic.LoadInt32(&s.closed) == 0
+}
+
+func (s *Service) flushScheduledBatches() (flushed bool, err error) {
+	defer func() {
+		if r := recover(); err != nil {
+			err = fmt.Errorf("failed to flush batch: %v", r)
+		}
+	}()
+	s.mux.RLock()
+	size := len(s.flushScheduled)
+	s.mux.RUnlock()
+
+	if size == 0 {
+		return false, nil
+	}
+	s.mux.Lock()
+	batch := s.flushScheduled[0]
+	s.flushScheduled = s.flushScheduled[1:]
+	s.mux.Unlock()
+	err = s.Flush(batch)
+	return true, err
 }
 
 func NewCollectors(config *config.Config,

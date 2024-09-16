@@ -63,12 +63,13 @@ func (a *Accumulator) Put(key, value interface{}) {
 	a.RWMutex.Lock()
 	if a.useFastMap {
 		a.FastMap.Put(int64(key.(int)), value)
-		a.size = uint32(a.FastMap.Size())
+		a.RWMutex.Unlock()
+		atomic.StoreUint32(&a.size, uint32(a.FastMap.Size()))
 	} else {
 		a.Map[key] = value
-		a.size = uint32(len(a.Map))
+		a.RWMutex.Unlock()
+		atomic.StoreUint32(&a.size, uint32(len(a.Map)))
 	}
-	a.RWMutex.Unlock()
 }
 
 func NewAccumulator(fastMap *FMapPool) *Accumulator {
@@ -85,7 +86,13 @@ func NewAccumulator(fastMap *FMapPool) *Accumulator {
 }
 
 func (b *Batch) IsActive(batch *config.Batch) bool {
-	return b.Accumulator.Len() < batch.MaxElements && time.Now().Sub(b.Started) < batch.MaxDuration() && atomic.LoadUint32(&b.flushStarted) == 0
+	if atomic.LoadUint32(&b.flushStarted) == 1 {
+		return false
+	}
+	if b.Accumulator.Len() >= batch.MaxElements {
+		return false
+	}
+	return time.Now().Sub(b.Started) < batch.MaxDuration()
 }
 
 func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...Option) (*Batch, error) {
