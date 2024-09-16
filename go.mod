@@ -12,6 +12,7 @@ require (
 	github.com/viant/afs v1.16.1-0.20220601210902-dc23d64dda15
 	github.com/viant/assertly v0.9.1-0.20220620174148-bab013f93a60
 	github.com/viant/dsunit v0.10.10
+	github.com/viant/gds v0.4.0
 	github.com/viant/gmetric v0.2.7-0.20220509165352-32e81d5e5fd8
 	github.com/viant/scy v0.4.1
 	github.com/viant/sqlx v0.15.2-0.20240904183634-ceb6544fd16c
@@ -46,3 +47,4 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
+

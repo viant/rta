@@ -57,6 +57,7 @@ type Service struct {
 	closed              int32
 	randGenerator       *rand.Rand
 	loadCount           int
+	fastMapPool         *FMapPool
 }
 
 func (s *Service) NotifyWatcher() {
@@ -248,11 +249,12 @@ func (s *Service) Close() error {
 	if batch == nil {
 		return nil
 	}
+	atomic.AddInt32(&s.closed, 1)
 	err := s.FlushInBackground(batch)
 	if err != nil {
 		log.Println(err)
 	}
-	atomic.AddInt32(&s.closed, 1)
+
 	return err
 }
 
@@ -317,6 +319,10 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
 		loadErr = s.load(context.Background(), data, batch.ID)
+		acc := batch.Accumulator
+		if acc.FastMap != nil {
+			s.fastMapPool.Put(acc.FastMap)
+		}
 	}
 
 	if loadErr != nil {
@@ -360,6 +366,7 @@ func (s *Service) FlushInBackground(batch *Batch) error {
 	}
 
 	err := s.joinErrors(allErrors)
+
 	return err
 }
 
@@ -396,7 +403,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 	scanner := bufio.NewScanner(reader)
 	processed := 0
 	failed := 0
-	acc := NewAccumulator()
+	acc := NewAccumulator(s.fastMapPool)
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
@@ -498,6 +505,9 @@ func New(config *config.Config,
 		instanceId: NewOptions(options...).GetInstanceId(),
 	}
 
+	if config.UseFastMap {
+		srv.fastMapPool = NewFMapPool(max(100, config.FastMapSize), 2)
+	}
 	if config.LoadDelayMaxMs > 0 {
 		seed := time.Now().UnixNano() + int64(config.LoadDelaySeedPart)
 		srv.randGenerator = rand.New(rand.NewSource(seed))

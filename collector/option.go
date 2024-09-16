@@ -4,6 +4,7 @@ type (
 	Options struct {
 		streamURLSymLinkTrg string
 		instanceId          string
+		pool                *FMapPool
 	}
 
 	Option func(o *Options)
@@ -15,6 +16,12 @@ func NewOptions(options ...Option) *Options {
 		item(ret)
 	}
 	return ret
+}
+
+func WithPool(pool *FMapPool) Option {
+	return func(o *Options) {
+		o.pool = pool
+	}
 }
 
 func WithStreamURLSymLinkTrg(streamURLSymLinkTrg string) Option {

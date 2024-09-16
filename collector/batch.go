@@ -6,6 +6,7 @@ import (
 	"github.com/viant/afs"
 	"github.com/viant/afs/file"
 	"github.com/viant/afs/url"
+	"github.com/viant/gds/fmap"
 	"github.com/viant/rta/collector/config"
 	"github.com/viant/rta/shared"
 	tconfig "github.com/viant/tapper/config"
@@ -33,8 +34,10 @@ type (
 	}
 
 	Accumulator struct {
-		Map  map[interface{}]interface{}
-		size uint32
+		Map        map[interface{}]interface{}
+		useFastMap bool
+		FastMap    *fmap.FastMap[any]
+		size       uint32
 		sync.RWMutex
 	}
 )
@@ -45,20 +48,40 @@ func (a *Accumulator) Len() int {
 
 func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 	a.RWMutex.RLock()
-	data, ok := a.Map[key]
+	var data interface{}
+	var ok bool
+	if a.useFastMap {
+		data, ok = a.FastMap.Get(int64(key.(int)))
+	} else {
+		data, ok = a.Map[key]
+	}
 	a.RWMutex.RUnlock()
 	return data, ok
 }
 
 func (a *Accumulator) Put(key, value interface{}) {
 	a.RWMutex.Lock()
-	a.Map[key] = value
-	a.size = uint32(len(a.Map))
+	if a.useFastMap {
+		a.FastMap.Put(int64(key.(int)), value)
+		a.size = uint32(a.FastMap.Size())
+	} else {
+		a.Map[key] = value
+		a.size = uint32(len(a.Map))
+	}
 	a.RWMutex.Unlock()
 }
 
-func NewAccumulator() *Accumulator {
-	return &Accumulator{Map: make(map[interface{}]interface{}, 1000)}
+func NewAccumulator(fastMap *FMapPool) *Accumulator {
+	useFastMap := fastMap != nil
+	var fMap *fmap.FastMap[any]
+	if useFastMap {
+		fMap = fastMap.Get()
+	}
+	ret := &Accumulator{useFastMap: useFastMap, FastMap: fMap}
+	if !useFastMap {
+		ret.Map = make(map[interface{}]interface{}, 100)
+	}
+	return ret
 }
 
 func (b *Batch) IsActive(batch *config.Batch) bool {
@@ -73,12 +96,14 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 	var streamURLSymLink string
 	var pendingURL string
 
+	opts := NewOptions(options...)
+	symLinkStreamURLTrg := opts.GetStreamURLSymLinkTrg()
 	if disabled {
 		return &Batch{
 			PendingURL:        pendingURL,
 			ID:                UUID.String(),
 			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
-			Accumulator:       NewAccumulator(),
+			Accumulator:       NewAccumulator(opts.pool),
 			Started:           time.Now(),
 			Count:             0,
 			logger:            nil,
@@ -87,7 +112,6 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		}, nil
 	}
 
-	symLinkStreamURLTrg := NewOptions(options...).GetStreamURLSymLinkTrg()
 	switch symLinkStreamURLTrg {
 	case "":
 		URL = stream.URL
@@ -129,7 +153,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		PendingURL:        pendingURL,
 		ID:                UUID.String(),
 		Stream:            batchSteam,
-		Accumulator:       NewAccumulator(),
+		Accumulator:       NewAccumulator(opts.pool),
 		Started:           time.Now(),
 		Count:             0,
 		logger:            logger,

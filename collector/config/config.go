@@ -17,6 +17,8 @@ type Config struct {
 	ID                  string
 	Loader              *config.Config
 	Stream              *tconfig.Stream
+	UseFastMap          bool
+	FastMapSize         int
 	MaxMessageSize      int
 	Concurrency         int
 	Batch               *Batch

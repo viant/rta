@@ -11,13 +11,15 @@ import (
 	"github.com/viant/afs/url"
 	"github.com/viant/dsunit"
 	"github.com/viant/rta/collector/config"
+	loader "github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/load"
+	lconfig "github.com/viant/rta/load/config"
 	_ "github.com/viant/sqlx/metadata/product/sqlite"
+	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/toolbox"
 	"log"
 	"os"
 	"path"
-	"strings"
 	"testing"
 	"time"
 )
@@ -34,6 +36,69 @@ func init() {
 	}()
 
 }
+
+func BenchmarkService_FmapCollect(b *testing.B) {
+
+	cfg := config.Config{
+		ID:             "test",
+		Loader:         &lconfig.Config{},
+		Stream:         &tconfig.Stream{},
+		StreamDisabled: true,
+		FastMapSize:    100000,
+		UseFastMap:     true,
+		Batch: &config.Batch{
+			MaxElements:   100,
+			MaxDurationMs: int(time.Minute.Milliseconds()),
+		},
+	}
+
+	runBench(b, cfg)
+
+}
+
+func BenchmarkService_Collect(b *testing.B) {
+
+	cfg := config.Config{
+		ID:             "test",
+		Loader:         &lconfig.Config{},
+		Stream:         &tconfig.Stream{},
+		StreamDisabled: true,
+		Batch: &config.Batch{
+			MaxElements:   1000,
+			MaxDurationMs: int(time.Minute.Milliseconds()),
+		},
+	}
+	runBench(b, cfg)
+}
+
+func runBench(b *testing.B, cfg config.Config) {
+	new := time.Now()
+
+	loader := &loader.FunctionLoader{
+		LoadFn: func(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
+			return nil
+		},
+	}
+
+	srv, err := New(&cfg, newRecordFn, keyFn, reducerFn, mapperFn, loader, nil)
+	assert.Nil(b, err)
+	for j := 0; j < b.N; j++ {
+		for i := 0; i < 1000000; i++ {
+			inventory := Inventory{
+				ProductID: i,
+				Name:      "test name",
+				Quantity:  10,
+				Price:     1.55,
+				Updated:   &new,
+			}
+			err := srv.Collect(&inventory)
+			assert.Nil(b, err)
+
+		}
+	}
+	srv.Close()
+}
+
 func TestService_Collect(t *testing.T) {
 	baseDir, _ := os.Getwd()
 
@@ -189,12 +254,12 @@ func mapperFn(accumulator *Accumulator) interface{} {
 	}
 	return result
 }
+
 func keyFn(record interface{}) interface{} {
 	src := record.(*Inventory)
-	builder := strings.Builder{}
-	builder.WriteString(toolbox.AsString(src.ProductID) + "." + src.Name)
-	return builder.String()
+	return src.ProductID
 }
+
 func newRecordFn() interface{} {
 	return &Inventory{}
 }
