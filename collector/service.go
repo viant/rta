@@ -191,9 +191,9 @@ func (s *Service) Collect(record interface{}) error {
 	if err != nil {
 		return err
 	}
-	atomic.StoreUint32(&batch.collecting, 1)
+	atomic.AddUint32(&batch.collecting, 1)
 	defer func() {
-		atomic.StoreUint32(&batch.collecting, 0)
+		atomic.AddUint32(&batch.collecting, -1)
 	}()
 	data := batch.Accumulator
 	s.reduce(data, record)
