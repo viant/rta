@@ -32,7 +32,7 @@ func NewFMapPool(expectedSize int, allocSize int) *FMapPool {
 
 	ret.pool = sync.Pool{
 		New: func() interface{} {
-			return fmap.NewFastMap[int](ret.expectedSize, 0.5)
+			return fmap.NewFastMap[any](ret.expectedSize, 0.5)
 		},
 	}
 	var aMap *fmap.FastMap[any]

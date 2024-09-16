@@ -177,7 +177,9 @@ func (s *Service) getBatch() (*Batch, error) {
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
 		return prevBatch, nil
 	}
-
+	if s.fastMapPool != nil {
+		s.options = append(s.options, WithFastMapPool(s.fastMapPool))
+	}
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
 		return nil, err

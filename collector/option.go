@@ -18,7 +18,7 @@ func NewOptions(options ...Option) *Options {
 	return ret
 }
 
-func WithPool(pool *FMapPool) Option {
+func WithFastMapPool(pool *FMapPool) Option {
 	return func(o *Options) {
 		o.pool = pool
 	}
