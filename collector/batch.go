@@ -50,22 +50,14 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 	var data interface{}
 	var ok bool
 	if a.UseFastMap {
-		capacity := a.FastMap.Cap()
-		//there is tiny  race condition chance with size being half of capacity, otherwise RLock is our bottleneck
-		withLock := a.FastMap.Size() > int(0.7*float64(capacity)) && capacity > 1000
-		if withLock {
-			a.RWMutex.RLock()
-		}
+		scn := a.FastMap.SCN()
 		data, ok = a.FastMap.Get(int64(key.(int)))
-		if withLock {
-			a.RWMutex.RUnlock()
-		}
-		if ok && !withLock && data == nil {
+		next := a.FastMap.SCN()
+		if scn != next {
 			a.RWMutex.RLock()
 			data, ok = a.FastMap.Get(int64(key.(int)))
 			a.RWMutex.RUnlock()
 		}
-
 	} else {
 		a.RWMutex.RLock()
 		data, ok = a.Map[key]

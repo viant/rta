@@ -278,6 +278,11 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 		return
 	}
 	accumulator, ok := acc.Get(key)
+	if ok && accumulator == nil {
+		accumulator, ok = acc.Get(key)
+		log.Printf("map get - race condition detected %v %v\n", key, record)
+	}
+
 	if !ok {
 		accumulator = s.newRecord()
 		acc.Put(key, accumulator)
