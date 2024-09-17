@@ -58,6 +58,7 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 			data, ok = a.FastMap.Get(int64(key.(int)))
 			a.RWMutex.RUnlock()
 		}
+
 	} else {
 		a.RWMutex.RLock()
 		data, ok = a.Map[key]
