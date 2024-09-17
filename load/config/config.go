@@ -107,6 +107,14 @@ func (c *Config) validateDirect() error {
 	return nil
 }
 
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	ret := *c
+	return &ret
+}
+
 func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	fs := afs.New()
 	reader, err := fs.OpenURL(ctx, URL)

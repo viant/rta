@@ -30,6 +30,19 @@ type Config struct {
 	LoadDelayOnlyOnce   bool
 }
 
+func (c *Config) Clone() *Config {
+	var result = *c
+	result.Loader = c.Loader.Clone()
+	stream := c.Stream
+	if stream != nil {
+		s := *stream
+		result.Stream = &s
+	}
+	result.Batch = c.Batch.Clone()
+	result.Retry = c.Retry.Clone()
+	return &result
+}
+
 func (c *Config) IsStreamEnabled() bool {
 	return !c.StreamDisabled
 }
@@ -37,6 +50,11 @@ func (c *Config) IsStreamEnabled() bool {
 type Retry struct {
 	EveryInSec int
 	Max        int
+}
+
+func (r Retry) Clone() *Retry {
+	var result = r
+	return &result
 }
 
 type Batch struct {
@@ -52,6 +70,14 @@ func (b *Batch) MaxDuration() time.Duration {
 	b.maxDuration = time.Millisecond * time.Duration(b.MaxDurationMs)
 	return b.maxDuration
 
+}
+
+func (b *Batch) Clone() *Batch {
+	if b == nil {
+		return nil
+	}
+	var result = *b
+	return &result
 }
 
 func (c *Config) Validate() error {
