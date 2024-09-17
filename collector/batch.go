@@ -68,17 +68,22 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 	return data, ok
 }
 
-func (a *Accumulator) Put(key, value interface{}) {
+func (a *Accumulator) Put(key, value interface{}) interface{} {
 	a.RWMutex.Lock()
+	defer a.RWMutex.Unlock()
+
 	if a.UseFastMap {
+		k := int64(key.(int))
+		if prev, _ := a.FastMap.Get(k); prev != nil {
+			return prev
+		}
 		a.FastMap.Put(int64(key.(int)), value)
-		a.RWMutex.Unlock()
 		atomic.StoreUint32(&a.size, uint32(a.FastMap.Size()))
 	} else {
 		a.Map[key] = value
-		a.RWMutex.Unlock()
 		atomic.StoreUint32(&a.size, uint32(len(a.Map)))
 	}
+	return value
 }
 
 func NewAccumulator(fastMap *FMapPool) *Accumulator {
