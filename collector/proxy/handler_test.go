@@ -152,13 +152,11 @@ func TestHandler_Handle(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-
 		sliceType := testCase.sliceType
 		if sliceType == nil {
 			sliceType = reflect.TypeOf(records{})
 		}
-
-		handler := NewHandler(sliceType, testCase.collector)
+		handler := NewHandler(sliceType, false, testCase.collector)
 		err := handler.Handle([]byte(testCase.data))
 		if !assert.Nil(t, err, testCase.description) {
 			continue
@@ -190,6 +188,10 @@ func (c *recordCollector) CollectAll(rec ...interface{}) error {
 		}
 	}
 	return nil
+}
+
+func (c *recordCollector) ID() string {
+	return "test"
 }
 
 func (c *recordCollector) Collect(rec interface{}) error {

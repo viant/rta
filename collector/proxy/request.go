@@ -9,8 +9,9 @@ import (
 )
 
 type Request struct {
-	BatchID string
-	Records interface{}
+	CollectorID string
+	BatchID     string
+	Records     interface{}
 }
 
 func (r *Request) httpRequest(endpoint *Endpoint) (*http.Request, error) {
@@ -37,6 +38,7 @@ func (r *Request) httpRequest(endpoint *Endpoint) (*http.Request, error) {
 // MarshalJSONObject implements MarshalerJSONObject
 func (r *Request) MarshalJSONObject(enc *gojay.Encoder) {
 	enc.StringKey("BatchID", r.BatchID)
+	enc.StringKey("CollectorID", r.CollectorID)
 	records, ok := r.Records.(gojay.MarshalerJSONArray)
 	if ok {
 		enc.ArrayKey("Records", records)

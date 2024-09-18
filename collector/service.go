@@ -192,6 +192,10 @@ func (s *Service) getBatch() (*Batch, error) {
 	return batch, nil
 }
 
+func (s *Service) ID() string {
+	return s.config.ID
+}
+
 func (s *Service) Collect(record interface{}) error {
 	return s.CollectAll(record)
 }

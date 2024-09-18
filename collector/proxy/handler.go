@@ -15,11 +15,14 @@ import (
 
 type (
 	Handler struct {
-		collectors []*Collector
-		targetType reflect.Type
+		collectors        []*Collector
+		targetType        reflect.Type
+		index             map[string]int
+		useNamedCollector bool
 	}
 
 	Collector struct {
+		id string
 		collector.Collector
 		xSlice *xunsafe.Slice
 	}
@@ -95,8 +98,16 @@ func (h *Handler) Handle(data []byte) error {
 	if collectorCnt == 0 {
 		return fmt.Errorf("rta collector proxy handler: no collectors defined")
 	}
-
 	errors := &shared.Errors{}
+	if h.useNamedCollector {
+		idx, ok := h.index[request.CollectorID]
+		if !ok {
+			return fmt.Errorf("failed to lookup collector: %v", request.CollectorID)
+		}
+		h.collectors[idx].CollectAll(request.Records, 0, recordCount, errors, nil)
+		return errors.First()
+	}
+
 	if collectorCnt == 1 {
 		h.collectors[0].CollectAll(request.Records, 0, recordCount, errors, nil)
 	} else {
@@ -125,11 +136,14 @@ func (h *Handler) readPayload(request *http.Request) ([]byte, error) {
 	return data, err
 }
 
-func NewHandler(targetSliceType reflect.Type, collectors ...collector.Collector) *Handler {
-	var result = &Handler{targetType: targetSliceType}
+func NewHandler(targetSliceType reflect.Type, useNamedCollector bool, collectors ...collector.Collector) *Handler {
+	var result = &Handler{targetType: targetSliceType, index: make(map[string]int), useNamedCollector: useNamedCollector}
 	result.collectors = make([]*Collector, len(collectors))
 	for i, aCollector := range collectors {
-		result.collectors[i] = &Collector{Collector: aCollector, xSlice: xunsafe.NewSlice(targetSliceType)}
+		result.collectors[i] = &Collector{id: aCollector.ID(), Collector: aCollector, xSlice: xunsafe.NewSlice(targetSliceType)}
+		if useNamedCollector {
+			result.index[aCollector.ID()] = i
+		}
 	}
 	return result
 }
