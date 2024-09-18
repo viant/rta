@@ -294,11 +294,11 @@ func (s *Service) Flush(batch *Batch) error {
 	}
 	batch.Mutex.Lock()
 	defer batch.Mutex.Unlock()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1200; i++ {
 		if atomic.LoadInt32(&batch.collecting) == 0 {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	stats := stat.New()

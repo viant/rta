@@ -34,6 +34,15 @@ func (c *Collector) CollectAll(source interface{}, from, to int, errors *shared.
 	if wg != nil {
 		defer wg.Done()
 	}
+	if c.xSlice.Type.Elem().Kind() == reflect.Interface {
+		converted := reflect.ValueOf(source).Elem().Convert(reflect.TypeOf([]interface{}{}))
+		var iSlice = converted.Interface().([]interface{})
+		if err := c.Collector.CollectAll((iSlice)[from:to]...); err != nil {
+			errors.Add(err)
+			return
+		}
+		return
+	}
 
 	slicePtr := xunsafe.AsPointer(source)
 	for i := from; i < to; i++ {
