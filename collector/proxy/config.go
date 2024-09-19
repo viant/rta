@@ -86,3 +86,14 @@ func (e *Endpoint) KeepAliveTime() time.Duration {
 	e.keepAliveTime = time.Millisecond * time.Duration(e.KeepAliveTimeMs)
 	return e.keepAliveTime
 }
+
+func (e *Endpoint) Clone() *Endpoint {
+	result := *e
+	return &result
+}
+
+func (c *Config) Clone() *Config {
+	result := *c
+	result.Endpoint = *c.Endpoint.Clone()
+	return &result
+}
