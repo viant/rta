@@ -560,9 +560,13 @@ func (s *Service) IsUp() bool {
 
 func (s *Service) flushScheduledBatches() (flushed bool, err error) {
 	defer func() {
-		if r := recover(); err != nil {
-			err = fmt.Errorf("failed to flush batch: %v", r)
+		if r := recover(); r != nil {
+			err = fmt.Errorf("goroutine panic: %v", r)
 		}
+		if err != nil {
+			err = fmt.Errorf("failed to flush batch due to: %w", err)
+		}
+
 	}()
 	s.mux.RLock()
 	size := len(s.flushScheduled)
