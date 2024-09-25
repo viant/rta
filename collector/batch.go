@@ -23,7 +23,6 @@ type (
 		*tconfig.Stream
 		Accumulator *Accumulator
 		Started     time.Time
-		Count       int32
 		logger      *log.Logger
 		PendingURL  string
 		sync.Mutex
@@ -126,7 +125,6 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
 			Accumulator:       NewAccumulator(opts.pool),
 			Started:           time.Now(),
-			Count:             0,
 			logger:            nil,
 			pendingURLSymLink: pendingURLSymLink,
 			streamURLSymLink:  streamURLSymLink,
@@ -176,7 +174,6 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		Stream:            batchSteam,
 		Accumulator:       NewAccumulator(opts.pool),
 		Started:           time.Now(),
-		Count:             0,
 		logger:            logger,
 		pendingURLSymLink: pendingURLSymLink,
 		streamURLSymLink:  streamURLSymLink,
