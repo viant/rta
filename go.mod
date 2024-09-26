@@ -16,7 +16,7 @@ require (
 	github.com/viant/gmetric v0.2.7-0.20220509165352-32e81d5e5fd8
 	github.com/viant/scy v0.4.1
 	github.com/viant/sqlx v0.15.2-0.20240904183634-ceb6544fd16c
-	github.com/viant/tapper v0.6.4-0.20220622150849-b84262d38655
+	github.com/viant/tapper v0.7.1
 	github.com/viant/toolbox v0.34.6-0.20221112031702-3e7cdde7f888
 	github.com/viant/xunsafe v0.9.2
 	gopkg.in/yaml.v3 v3.0.1

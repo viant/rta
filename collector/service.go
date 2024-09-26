@@ -68,7 +68,7 @@ func (s *Service) NotifyWatcher() {
 func (s *Service) watchScheduledBatches() {
 	sleepTime := 100 * time.Millisecond
 	for s.IsUp() {
-		flushed, err := s.flushScheduledBatches()
+		flushed, err := s.flushScheduledBatches(context.Background())
 		if err != nil {
 			log.Println(err)
 		}
@@ -558,7 +558,7 @@ func (s *Service) IsUp() bool {
 	return atomic.LoadInt32(&s.closed) == 0
 }
 
-func (s *Service) flushScheduledBatches() (flushed bool, err error) {
+func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("goroutine panic: %v", r)
@@ -580,14 +580,25 @@ func (s *Service) flushScheduledBatches() (flushed bool, err error) {
 	if size == 0 {
 		return false, nil
 	}
-	batch := s.flushScheduled[0]
-	s.flushScheduled = s.flushScheduled[1:]
+	batchesToFlushNow := s.flushScheduled[:size]
+	s.flushScheduled = s.flushScheduled[size:]
 	s.mux.Unlock()
 
-	if atomic.LoadInt32(&batch.collecting) == 1 {
+	masterBatch := batchesToFlushNow[0]
+	for i := 1; i < len(batchesToFlushNow); i++ {
+		if err := s.mergeBatches(ctx, masterBatch, batchesToFlushNow[i]); err != nil {
+			//if merge failed, put back current failed batch and all the rest to the flushScheduled
+			s.mux.Lock()
+			s.flushScheduled = append(s.flushScheduled, batchesToFlushNow[0])
+			s.flushScheduled = append(s.flushScheduled, batchesToFlushNow[i:]...)
+			s.mux.Unlock()
+			return true, err
+		}
+	}
+	if atomic.LoadInt32(&masterBatch.collecting) == 1 {
 		return false, nil
 	}
-	err = s.Flush(batch)
+	err = s.Flush(masterBatch)
 	return true, err
 }
 
@@ -612,6 +623,31 @@ func (s *Service) watchActiveBatch() {
 		time.Sleep(sleepTime)
 	}
 
+}
+
+func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
+
+	if from.logger != nil && dest.logger != nil {
+		if err := dest.logger.Merge(ctx, from.logger); err != nil {
+			return err
+		}
+	}
+
+	if from.Accumulator.UseFastMap {
+		next := from.Accumulator.FastMap.Iterator()
+		for i := 0; i < from.Accumulator.FastMap.Size(); i++ {
+			_, value, hasMore := next()
+			s.reduce(dest.Accumulator, value)
+			if !hasMore {
+				break
+			}
+		}
+	} else if len(from.Accumulator.Map) > 0 {
+		for _, value := range from.Accumulator.Map {
+			s.reduce(dest.Accumulator, value)
+		}
+	}
+	return nil
 }
 
 func NewCollectors(config *config.Config,
