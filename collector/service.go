@@ -576,16 +576,17 @@ func (s *Service) flushScheduledBatches() (flushed bool, err error) {
 		return false, nil
 	}
 	s.mux.Lock()
-	defer s.mux.Unlock()
 	size = len(s.flushScheduled)
 	if size == 0 {
 		return false, nil
 	}
 	batch := s.flushScheduled[0]
+	s.flushScheduled = s.flushScheduled[1:]
+	s.mux.Unlock()
+
 	if atomic.LoadInt32(&batch.collecting) == 1 {
 		return false, nil
 	}
-	s.flushScheduled = s.flushScheduled[1:]
 	err = s.Flush(batch)
 	return true, err
 }
