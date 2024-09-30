@@ -98,28 +98,34 @@ func NewAccumulator(fastMap *FMapPool) *Accumulator {
 	return ret
 }
 
-func (b *Batch) removePendingFile(fs afs.Service) error {
+func (b *Batch) removePendingFile(ctx context.Context, fs afs.Service) error {
 	if b.PendingURL == "" {
 		return nil
 	}
-	if err := fs.Delete(context.Background(), b.PendingURL); err != nil {
-		return err
+	if ok, _ := fs.Exists(ctx, b.PendingURL); ok {
+		if err := fs.Delete(ctx, b.PendingURL); err != nil {
+			return err
+		}
 	}
-	if b.pendingURLSymLink != "" {
-		return fs.Delete(context.Background(), b.pendingURLSymLink)
+	if ok, _ := fs.Exists(ctx, b.pendingURLSymLink); ok {
+		if b.pendingURLSymLink != "" {
+			return fs.Delete(ctx, b.pendingURLSymLink)
+		}
 	}
 	return nil
 }
 
-func (b *Batch) removeDataFile(fs afs.Service) error {
+func (b *Batch) removeDataFile(ctx context.Context, fs afs.Service) error {
 	if b.Stream.URL == "" {
 		return nil
 	}
 	if err := fs.Delete(context.Background(), b.Stream.URL); err != nil {
 		return err
 	}
-	if b.streamURLSymLink != "" {
-		return fs.Delete(context.Background(), b.streamURLSymLink)
+	if ok, _ := fs.Exists(ctx, b.streamURLSymLink); ok {
+		if b.streamURLSymLink != "" {
+			return fs.Delete(context.Background(), b.streamURLSymLink)
+		}
 	}
 	return nil
 }
