@@ -119,8 +119,10 @@ func (b *Batch) removeDataFile(ctx context.Context, fs afs.Service) error {
 	if b.Stream.URL == "" {
 		return nil
 	}
-	if err := fs.Delete(context.Background(), b.Stream.URL); err != nil {
-		return err
+	if ok, _ := fs.Exists(ctx, b.Stream.URL); ok {
+		if err := fs.Delete(context.Background(), b.Stream.URL); err != nil {
+			return err
+		}
 	}
 	if ok, _ := fs.Exists(ctx, b.streamURLSymLink); ok {
 		if b.streamURLSymLink != "" {
