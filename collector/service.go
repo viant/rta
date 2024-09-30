@@ -315,63 +315,34 @@ func (s *Service) Flush(batch *Batch) error {
 		}()
 	}
 	if batch.logger != nil {
-		batch.logger.Close()
+		_ = batch.logger.Close()
 	}
-	var allErrors []error
-	var loadErr error
 
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
-		loadErr = s.load(context.Background(), data, batch.ID)
+		//if load error quit for know, retry will be handled in next flush
+		if err := s.load(context.Background(), data, batch.ID); err != nil {
+			return err
+		}
 		acc := batch.Accumulator
 		if acc.FastMap != nil {
 			s.fastMapPool.Put(acc.FastMap)
 		}
 	}
-
-	if loadErr != nil {
-		stats.Append(loadErr)
-		allErrors = append(allErrors, loadErr)
-	}
-
 	if s.config.StreamDisabled {
-		return loadErr
+		return nil
 	}
-
-	if err2 := s.fs.Delete(context.Background(), batch.PendingURL); err2 != nil {
-		stats.Append(err2)
-		allErrors = append(allErrors, err2)
+	var allErrors []error
+	if err := batch.removePendingFile(s.fs); err != nil {
+		stats.Append(err)
+		allErrors = append(allErrors, err)
 	}
-
-	if batch.pendingURLSymLink != "" {
-		err2b := s.fs.Delete(context.Background(), batch.pendingURLSymLink)
-		if err2b != nil {
-			stats.Append(err2b)
-			allErrors = append(allErrors, err2b)
-		}
+	if err := batch.removeDataFile(s.fs); err != nil {
+		stats.Append(err)
+		allErrors = append(allErrors, err)
 	}
-
-	// In cause of load err delete just pending file but not stream file
-	if loadErr != nil {
-		return s.joinErrors(allErrors)
-	}
-
-	if err3 := s.fs.Delete(context.Background(), batch.Stream.URL); err3 != nil {
-		stats.Append(err3)
-		allErrors = append(allErrors, err3)
-	}
-
-	if batch.streamURLSymLink != "" {
-		err3b := s.fs.Delete(context.Background(), batch.streamURLSymLink)
-		if err3b != nil {
-			stats.Append(err3b)
-			allErrors = append(allErrors, err3b)
-		}
-	}
-
 	err := s.joinErrors(allErrors)
-
 	return err
 }
 
@@ -599,6 +570,11 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		return false, nil
 	}
 	err = s.Flush(masterBatch)
+	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
+		s.mux.Lock()
+		s.flushScheduled = append(s.flushScheduled, batchesToFlushNow[0])
+		s.mux.Unlock()
+	}
 	return true, err
 }
 
@@ -626,10 +602,14 @@ func (s *Service) watchActiveBatch() {
 }
 
 func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
-
 	if from.logger != nil && dest.logger != nil {
 		if err := dest.logger.Merge(ctx, from.logger); err != nil {
 			return err
+		}
+		if s.config.IsStreamEnabled() {
+			if err := from.removePendingFile(s.fs); err != nil {
+				log.Println(fmt.Sprintf("failed to remove pending files: %v %v", from.PendingURL, err))
+			} //it's not critical error
 		}
 	}
 
