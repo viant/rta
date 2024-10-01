@@ -107,10 +107,9 @@ func (b *Batch) removePendingFile(ctx context.Context, fs afs.Service) error {
 			return err
 		}
 	}
-	if ok, _ := fs.Exists(ctx, b.pendingURLSymLink); ok {
-		if b.pendingURLSymLink != "" {
-			return fs.Delete(ctx, b.pendingURLSymLink)
-		}
+
+	if b.pendingURLSymLink != "" {
+		return fs.Delete(ctx, b.pendingURLSymLink)
 	}
 	return nil
 }
@@ -124,10 +123,9 @@ func (b *Batch) removeDataFile(ctx context.Context, fs afs.Service) error {
 			return err
 		}
 	}
-	if ok, _ := fs.Exists(ctx, b.streamURLSymLink); ok {
-		if b.streamURLSymLink != "" {
-			return fs.Delete(context.Background(), b.streamURLSymLink)
-		}
+
+	if b.streamURLSymLink != "" {
+		return fs.Delete(context.Background(), b.streamURLSymLink)
 	}
 	return nil
 }
