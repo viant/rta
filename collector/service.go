@@ -325,11 +325,9 @@ func (s *Service) Flush(batch *Batch) error {
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
 			return err
 		}
-		acc := batch.Accumulator
-		if acc.FastMap != nil {
-			s.fastMapPool.Put(acc.FastMap)
-		}
+		s.closeBatch(batch)
 	}
+
 	if s.config.StreamDisabled {
 		return nil
 	}
@@ -344,6 +342,13 @@ func (s *Service) Flush(batch *Batch) error {
 	}
 	err := s.joinErrors(allErrors)
 	return err
+}
+
+func (s *Service) closeBatch(batch *Batch) {
+	acc := batch.Accumulator
+	if acc.FastMap != nil {
+		s.fastMapPool.Put(acc.FastMap)
+	}
 }
 
 func (s *Service) joinErrors(allErrors []error) error {
@@ -627,6 +632,8 @@ func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) er
 			s.reduce(dest.Accumulator, value)
 		}
 	}
+	s.closeBatch(from)
+
 	return nil
 }
 
