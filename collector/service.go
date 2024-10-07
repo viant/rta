@@ -203,27 +203,50 @@ func (s *Service) Collect(record interface{}) error {
 func (s *Service) CollectAll(records ...interface{}) error {
 	batch, err := s.getBatch()
 	if err != nil {
+		fmt.Printf("failed to get batch: %v\n", err)
 		return err
 	}
 	atomic.AddInt32(&batch.collecting, 1)
 	defer func() {
 		atomic.AddInt32(&batch.collecting, -1)
 	}()
-	if atomic.LoadUint32(&batch.flushStarted) == 1 {
-		batch, err = s.getBatch()
-		if err != nil {
-			return err
-		}
+	err = s.collectAll(records, batch)
+	if err != nil {
+		fmt.Printf("failed to collect batch: %v\n", err)
 	}
-	data := batch.Accumulator
-	for i := range records {
-		s.reduce(data, records[i])
-		if s.config.IsStreamEnabled() {
-			err = s.backupLogEntry(records[i], batch)
-		}
-	}
+
 	return err
 }
+
+func (s *Service) collectAll(records []interface{}, batch *Batch) error {
+	data := batch.Accumulator
+	for i := range records { //collect all to memory
+		s.reduce(data, records[i])
+	}
+	if s.config.StreamDisabled {
+		return nil
+	}
+	for i := range records {
+		if err := s.backupLogEntry(records[i], batch); err != nil { //io error
+			bErr := &BackupError{Total: len(records), Failed: len(records) - i, err: err}
+			return bErr
+		}
+
+	}
+	return nil
+}
+
+type BackupError struct {
+	Total  int
+	Failed int
+	err    error
+}
+
+func (b *BackupError) Error() string {
+	return fmt.Sprintf("failed to backup log: failed: %v of %v, due to %v", b.Failed, b.Total, b.err)
+}
+
+var testCounter = int32(0)
 
 func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 	message := s.Provider.NewMessage()
@@ -236,8 +259,13 @@ func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 		}
 		enc = provider.New(record)
 	}
-
 	enc.Encode(message)
+
+	// just for testing purpose
+	//if atomic.AddInt32(&testCounter, 1) > 10000 && atomic.LoadInt32(&testCounter) < 40000 && atomic.LoadInt32(&testCounter)%2 == 1 {
+	//	return fmt.Errorf("device full i/o")
+	//}
+
 	if err := batch.logger.Log(message); err != nil {
 		return err
 	}
@@ -315,40 +343,40 @@ func (s *Service) Flush(batch *Batch) error {
 			s.flushCounter.DecrementValue(stat.Pending)
 		}()
 	}
-	if batch.logger != nil {
-		_ = batch.logger.Close()
-	}
 
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
+			atomic.StoreUint32(&batch.flushStarted, 0)
 			return err
 		}
-		s.closeBatch(batch)
-	}
 
-	if s.config.StreamDisabled {
-		return nil
 	}
-	var allErrors []error
-	if err := batch.removePendingFile(ctx, s.fs); err != nil {
-		stats.Append(err)
-		allErrors = append(allErrors, err)
-	}
-	if err := batch.removeDataFile(ctx, s.fs); err != nil {
-		stats.Append(err)
-		allErrors = append(allErrors, err)
-	}
-	err := s.joinErrors(allErrors)
-	return err
+	return s.closeBatch(ctx, batch)
+
 }
 
-func (s *Service) closeBatch(batch *Batch) {
+func (s *Service) closeBatch(ctx context.Context, batch *Batch) error {
+	var err error
+	if s.config.IsStreamEnabled() {
+		if batch.logger != nil {
+			_ = batch.logger.Close()
+		}
+		var allErrors []error
+		if err := batch.removePendingFile(ctx, s.fs); err != nil {
+			allErrors = append(allErrors, err)
+		}
+		if err := batch.removeDataFile(ctx, s.fs); err != nil {
+			allErrors = append(allErrors, err)
+		}
+		err = s.joinErrors(allErrors)
+	}
 	acc := batch.Accumulator
 	if acc.FastMap != nil {
 		s.fastMapPool.Put(acc.FastMap)
 	}
+	return err
 }
 
 func (s *Service) joinErrors(allErrors []error) error {
@@ -409,7 +437,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 	if acc.Len() != 0 {
 		loadErr = s.load(ctx, data, batchID)
 	}
-	log.Printf("replaybatch - processed: %v, failed: %v\n", processed, failed)
+	log.Printf("replaybatch - processed: %v, failed: %v url: %v\n", processed, failed, URL)
 	if loadErr != nil {
 		stats.Append(loadErr)
 		return nil // avoid deleting files
@@ -537,6 +565,7 @@ func (s *Service) IsUp() bool {
 func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			//	debug.PrintStack()
 			err = fmt.Errorf("goroutine panic: %v", r)
 		}
 		if err != nil {
@@ -547,40 +576,69 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	s.mux.RLock()
 	size := len(s.flushScheduled)
 	s.mux.RUnlock()
-
 	if size == 0 {
 		return false, nil
 	}
-	s.mux.Lock()
-	size = len(s.flushScheduled)
-	if size == 0 {
+
+	batchesToFlushNow := s.getBatchesToFlush(size)
+	if len(batchesToFlushNow) == 0 {
 		return false, nil
 	}
-	batchesToFlushNow := s.flushScheduled[:size]
-	s.flushScheduled = s.flushScheduled[size:]
-	s.mux.Unlock()
-
 	masterBatch := batchesToFlushNow[0]
+
+	var inconsistentBackup []*Batch
 	for i := 1; i < len(batchesToFlushNow); i++ {
-		if err := s.mergeBatches(ctx, masterBatch, batchesToFlushNow[i]); err != nil {
-			//if merge failed, put back current failed batch and all the rest to the flushScheduled
-			s.mux.Lock()
-			s.flushScheduled = append(s.flushScheduled, batchesToFlushNow[0])
-			s.flushScheduled = append(s.flushScheduled, batchesToFlushNow[i:]...)
-			s.mux.Unlock()
-			return true, err
+		candidate := batchesToFlushNow[i]
+		if err := s.mergeBatches(ctx, masterBatch, candidate); err != nil {
+			if i+1 >= len(batchesToFlushNow) {
+				s.scheduleBatch(batchesToFlushNow[i+1:]...)
+			}
+			inconsistentBackup = append(inconsistentBackup, candidate)
+			fmt.Println("failed to merge batch, scheduling for flush", err)
+			break
 		}
 	}
-	if atomic.LoadInt32(&masterBatch.collecting) == 1 {
-		return false, nil
-	}
+
 	err = s.Flush(masterBatch)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
-		s.mux.Lock()
-		s.flushScheduled = append(s.flushScheduled, masterBatch)
-		s.mux.Unlock()
+		s.scheduleBatch(masterBatch)
+	}
+	if err == nil {
+		for i, item := range inconsistentBackup {
+			if err := s.closeBatch(ctx, item); err != nil {
+				fmt.Printf("failed to close insonsisten batch %v/%v, %v", i, len(inconsistentBackup), err)
+			}
+		}
 	}
 	return true, err
+}
+
+func (s *Service) getBatchesToFlush(size int) []*Batch {
+	batchesToFlushNow := make([]*Batch, 0, size)
+	if size == 0 {
+		return batchesToFlushNow
+	}
+
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	pendingTransactionBatches := make([]*Batch, 0, size)
+	for i, candidate := range s.flushScheduled {
+		if candidate.HasPendingTransaction() {
+			pendingTransactionBatches = append(pendingTransactionBatches, s.flushScheduled[i])
+
+		} else {
+			batchesToFlushNow = append(batchesToFlushNow, s.flushScheduled[i])
+		}
+	}
+
+	s.flushScheduled = pendingTransactionBatches
+	return batchesToFlushNow
+}
+
+func (s *Service) scheduleBatch(batches ...*Batch) {
+	s.mux.Lock()
+	s.flushScheduled = append(s.flushScheduled, batches...)
+	s.mux.Unlock()
 }
 
 func (s *Service) watchActiveBatch() {
@@ -607,33 +665,37 @@ func (s *Service) watchActiveBatch() {
 }
 
 func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
-	if from.logger != nil && dest.logger != nil {
-		if err := dest.logger.Merge(ctx, from.logger); err != nil {
-			return err
-		}
-		if s.config.IsStreamEnabled() {
-			if err := from.removePendingFile(ctx, s.fs); err != nil {
-				log.Println(fmt.Sprintf("failed to remove pending files: %v %v", from.PendingURL, err))
-			} //it's not critical error
-		}
-	}
-
+	var items []interface{}
 	if from.Accumulator.UseFastMap {
 		next := from.Accumulator.FastMap.Iterator()
+		items = make([]interface{}, 0, from.Accumulator.FastMap.Size())
 		for i := 0; i < from.Accumulator.FastMap.Size(); i++ {
 			_, value, hasMore := next()
-			s.reduce(dest.Accumulator, value)
 			if !hasMore {
 				break
 			}
+			items = append(items, value)
 		}
 	} else if len(from.Accumulator.Map) > 0 {
+		items = make([]interface{}, 0, len(from.Accumulator.Map))
 		for _, value := range from.Accumulator.Map {
-			s.reduce(dest.Accumulator, value)
+			items = append(items, value)
 		}
 	}
-	s.closeBatch(from)
 
+	err := s.collectAll(items, dest)
+	if err != nil {
+		fmt.Printf("mergebatches: merging to master batch with error: %v, %v\n", len(items), err)
+	} else {
+		fmt.Printf("mergebatches: merging to master batch: %v\n", len(items))
+	}
+
+	if err != nil {
+		return err
+	}
+	if err := s.closeBatch(ctx, from); err != nil {
+		fmt.Printf("failed to close item merged batched: %v\n", err)
+	}
 	return nil
 }
 

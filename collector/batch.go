@@ -41,6 +41,10 @@ type (
 	}
 )
 
+func (a *Batch) HasPendingTransaction() bool {
+	return atomic.LoadInt32(&a.collecting) > 0
+}
+
 func (a *Accumulator) Len() int {
 	return int(atomic.LoadUint32(&a.size))
 }
