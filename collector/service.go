@@ -344,6 +344,7 @@ func (s *Service) Flush(batch *Batch) error {
 		data := s.mapperFn(batch.Accumulator)
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
+			stats.Append(err)
 			return err
 		}
 
