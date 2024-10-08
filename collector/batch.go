@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/viant/afs"
 	"github.com/viant/afs/file"
@@ -25,6 +26,7 @@ type (
 		Started     time.Time
 		logger      *log.Logger
 		PendingURL  string
+		flushAfter  *time.Time
 		sync.Mutex
 		collecting        int32
 		flushStarted      uint32
@@ -41,15 +43,33 @@ type (
 	}
 )
 
-func (a *Batch) HasPendingTransaction() bool {
-	return atomic.LoadInt32(&a.collecting) > 0
+func (b *Batch) HasPendingTransaction() bool {
+	return atomic.LoadInt32(&b.collecting) > 0
+}
+
+func (b *Batch) IsReadyForFlush(ts *time.Time) bool {
+	if b.HasPendingTransaction() {
+		return false
+	}
+	return ts.After(*b.flushAfter)
+}
+
+func (b *Batch) ensureNoPending() {
+	for i := 0; i < 1200; i++ { //extra safety check
+		if !b.HasPendingTransaction() {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+		fmt.Printf("ensureNoPending: %v\n", i)
+	}
+	fmt.Printf("pending transaction still exists\n")
 }
 
 func (a *Accumulator) Len() int {
 	return int(atomic.LoadUint32(&a.size))
 }
 
-func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
+func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
 	var data interface{}
 	var ok bool
 	if a.UseFastMap {
@@ -60,12 +80,31 @@ func (a *Accumulator) Get(key interface{}) (interface{}, bool) {
 			a.RWMutex.RLock()
 			data, ok = a.FastMap.Get(int64(key.(int)))
 			a.RWMutex.RUnlock()
+			if !ok {
+				a.RWMutex.Lock()
+				data, ok = a.FastMap.Get(int64(key.(int)))
+				if !ok {
+					data = get()
+					a.FastMap.Put(int64(key.(int)), data)
+					atomic.StoreUint32(&a.size, uint32(a.FastMap.Size()))
+				}
+				a.RWMutex.Unlock()
+			}
 		}
-
 	} else {
 		a.RWMutex.RLock()
 		data, ok = a.Map[key]
 		a.RWMutex.RUnlock()
+		if !ok {
+			a.RWMutex.Lock()
+			data, ok = a.Map[key]
+			if !ok {
+				data = get()
+				a.Map[key] = data
+				atomic.StoreUint32(&a.size, uint32(len(a.Map)))
+			}
+			a.RWMutex.Unlock()
+		}
 	}
 
 	return data, ok

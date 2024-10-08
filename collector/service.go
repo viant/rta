@@ -42,7 +42,7 @@ type Service struct {
 	reducerFn      func(accumulator, source interface{})
 	mapperFn       func(acc *Accumulator) interface{}
 	loader         loader2.Loader
-	batch          *Batch
+	activeBatch    *Batch
 	flushScheduled []*Batch
 	mux            sync.RWMutex
 	encProvider    *encoder.Provider
@@ -166,14 +166,14 @@ func (s *Service) loadFailedBatches(ctx context.Context, onStartUp bool, streamU
 
 func (s *Service) getBatch() (*Batch, error) {
 	s.mux.RLock()
-	prevBatch := s.batch
+	prevBatch := s.activeBatch
 	s.mux.RUnlock()
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
 		return prevBatch, nil
 	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	prevBatch = s.batch
+	prevBatch = s.activeBatch
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
 		return prevBatch, nil
 	}
@@ -185,10 +185,9 @@ func (s *Service) getBatch() (*Batch, error) {
 		return nil, err
 	}
 	if prevBatch != nil {
-		s.flushScheduled = append(s.flushScheduled, prevBatch)
+		s.scheduleBatch(false, prevBatch)
 	}
-	s.batch = batch
-
+	s.activeBatch = batch
 	return batch, nil
 }
 
@@ -275,8 +274,8 @@ func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 
 func (s *Service) Close() error {
 	s.mux.Lock()
-	batch := s.batch
-	s.batch = nil
+	batch := s.activeBatch
+	s.activeBatch = nil
 	s.mux.Unlock()
 	if batch == nil {
 		return nil
@@ -309,12 +308,13 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 	if key == "" {
 		return
 	}
-	accumulator, ok := acc.Get(key)
+	accumulator, ok := acc.GetOrCreate(key, s.newRecord)
 	if ok && accumulator == nil {
-		accumulator, ok = acc.Get(key)
+		accumulator, ok = acc.GetOrCreate(key, s.newRecord)
 		log.Printf("map get - race condition detected %v %v\n", accumulator, ok)
 	}
 	if accumulator == nil {
+		log.Printf("map get 2 - race condition detected %v %v\n", accumulator, ok)
 		accumulator = acc.Put(key, s.newRecord())
 	}
 	s.reducerFn(accumulator, record)
@@ -325,14 +325,9 @@ func (s *Service) Flush(batch *Batch) error {
 		return nil
 	}
 	ctx := context.Background()
+	batch.ensureNoPending()
 	batch.Mutex.Lock()
 	defer batch.Mutex.Unlock()
-	for i := 0; i < 1200; i++ {
-		if atomic.LoadInt32(&batch.collecting) == 0 {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 
 	stats := stat.New()
 	if s.flushCounter != nil {
@@ -579,7 +574,6 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	if size == 0 {
 		return false, nil
 	}
-
 	batchesToFlushNow := s.getBatchesToFlush(size)
 	if len(batchesToFlushNow) == 0 {
 		return false, nil
@@ -591,7 +585,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		candidate := batchesToFlushNow[i]
 		if err := s.mergeBatches(ctx, masterBatch, candidate); err != nil {
 			if i+1 >= len(batchesToFlushNow) {
-				s.scheduleBatch(batchesToFlushNow[i+1:]...)
+				s.scheduleBatch(true, batchesToFlushNow[i+1:]...)
 			}
 			inconsistentBackup = append(inconsistentBackup, candidate)
 			fmt.Println("failed to merge batch, scheduling for flush", err)
@@ -601,12 +595,12 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 
 	err = s.Flush(masterBatch)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
-		s.scheduleBatch(masterBatch)
+		s.scheduleBatch(true, masterBatch)
 	}
 	if err == nil {
 		for i, item := range inconsistentBackup {
 			if err := s.closeBatch(ctx, item); err != nil {
-				fmt.Printf("failed to close insonsisten batch %v/%v, %v", i, len(inconsistentBackup), err)
+				fmt.Printf("failed to close insonsisten activeBatch %v/%v, %v", i, len(inconsistentBackup), err)
 			}
 		}
 	}
@@ -615,50 +609,59 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 
 func (s *Service) getBatchesToFlush(size int) []*Batch {
 	batchesToFlushNow := make([]*Batch, 0, size)
-	if size == 0 {
-		return batchesToFlushNow
-	}
-
+	pendingTransactionBatches := make([]*Batch, 0, size)
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	pendingTransactionBatches := make([]*Batch, 0, size)
+	ts := time.Now()
 	for i, candidate := range s.flushScheduled {
-		if candidate.HasPendingTransaction() {
-			pendingTransactionBatches = append(pendingTransactionBatches, s.flushScheduled[i])
-
-		} else {
+		if candidate.IsReadyForFlush(&ts) {
 			batchesToFlushNow = append(batchesToFlushNow, s.flushScheduled[i])
+		} else {
+			pendingTransactionBatches = append(pendingTransactionBatches, s.flushScheduled[i])
 		}
 	}
-
 	s.flushScheduled = pendingTransactionBatches
 	return batchesToFlushNow
 }
 
-func (s *Service) scheduleBatch(batches ...*Batch) {
-	s.mux.Lock()
+func (s *Service) scheduleBatch(withLock bool, batches ...*Batch) {
+	t := time.Now()
+	t.Add(time.Second)
+	for _, batch := range batches {
+		batch.ScheduleAt(&t)
+	}
+	if withLock {
+		s.mux.Lock()
+	}
 	s.flushScheduled = append(s.flushScheduled, batches...)
-	s.mux.Unlock()
+	if withLock {
+		s.mux.Unlock()
+	}
+}
+
+func (b *Batch) ScheduleAt(ts *time.Time) {
+	if b.flushAfter != nil {
+		return
+	}
+	b.flushAfter = ts
 }
 
 func (s *Service) watchActiveBatch() {
 	sleepTime := 100 * time.Millisecond
 	for s.IsUp() {
-		s.mux.RLock()
-		batch := s.batch
-		s.mux.RUnlock()
+		s.mux.Lock()
+		batch := s.activeBatch
 		if batch == nil {
+			s.mux.Unlock()
 			time.Sleep(sleepTime)
 			continue
 		}
 
-		if !batch.IsActive(s.config.Batch) && atomic.LoadInt32(&batch.collecting) == 0 {
-			s.mux.Lock()
-			s.flushScheduled = append(s.flushScheduled, batch)
-			s.batch = nil
-			s.mux.Unlock()
+		if !batch.IsActive(s.config.Batch) && !batch.HasPendingTransaction() {
+			s.scheduleBatch(false, batch)
+			s.activeBatch = nil
 		}
-
+		s.mux.Unlock()
 		time.Sleep(sleepTime)
 	}
 
