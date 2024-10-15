@@ -3,12 +3,13 @@ package collector
 import (
 	"context"
 	"fmt"
+	"github.com/dolthub/swiss"
 	"github.com/google/uuid"
 	"github.com/viant/afs"
 	"github.com/viant/afs/file"
 	"github.com/viant/afs/url"
-	"github.com/viant/gds/fmap"
 	"github.com/viant/rta/collector/config"
+	fmap2 "github.com/viant/rta/collector/fmap"
 	"github.com/viant/rta/shared"
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/tapper/log"
@@ -37,7 +38,7 @@ type (
 	Accumulator struct {
 		Map        map[interface{}]interface{}
 		UseFastMap bool
-		FastMap    *fmap.FastMap[any]
+		FastMap    *swiss.Map[any, any]
 		size       uint32
 		sync.RWMutex
 	}
@@ -73,10 +74,10 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 	var data interface{}
 	var ok bool
 	if a.UseFastMap {
-		scn := a.FastMap.SCN()
+		scn := fmap2.Residents(a.FastMap)
 		data, ok = a.FastMap.Get(int64(key.(int)))
-		next := a.FastMap.SCN()
-		if scn != next {
+		next := fmap2.Residents(a.FastMap)
+		if scn != next || !ok {
 			a.RWMutex.RLock()
 			data, ok = a.FastMap.Get(int64(key.(int)))
 			a.RWMutex.RUnlock()
@@ -86,7 +87,7 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 				if !ok {
 					data = get()
 					a.FastMap.Put(int64(key.(int)), data)
-					atomic.StoreUint32(&a.size, uint32(a.FastMap.Size()))
+					atomic.StoreUint32(&a.size, uint32(a.FastMap.Count()))
 				}
 				a.RWMutex.Unlock()
 			}
@@ -106,21 +107,19 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 			a.RWMutex.Unlock()
 		}
 	}
-
 	return data, ok
 }
 
 func (a *Accumulator) Put(key, value interface{}) interface{} {
 	a.RWMutex.Lock()
 	defer a.RWMutex.Unlock()
-
 	if a.UseFastMap {
 		k := int64(key.(int))
 		if prev, _ := a.FastMap.Get(k); prev != nil {
 			return prev
 		}
 		a.FastMap.Put(int64(key.(int)), value)
-		atomic.StoreUint32(&a.size, uint32(a.FastMap.Size()))
+		atomic.StoreUint32(&a.size, uint32(a.FastMap.Count()))
 	} else {
 		a.Map[key] = value
 		atomic.StoreUint32(&a.size, uint32(len(a.Map)))
@@ -130,7 +129,7 @@ func (a *Accumulator) Put(key, value interface{}) interface{} {
 
 func NewAccumulator(fastMap *FMapPool) *Accumulator {
 	useFastMap := fastMap != nil
-	var fMap *fmap.FastMap[any]
+	var fMap *swiss.Map[any, any]
 	if useFastMap {
 		fMap = fastMap.Get()
 	}

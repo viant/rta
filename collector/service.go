@@ -671,15 +671,11 @@ func (s *Service) watchActiveBatch() {
 func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
 	var items []interface{}
 	if from.Accumulator.UseFastMap {
-		next := from.Accumulator.FastMap.Iterator()
-		items = make([]interface{}, 0, from.Accumulator.FastMap.Size())
-		for i := 0; i < from.Accumulator.FastMap.Size(); i++ {
-			_, value, hasMore := next()
-			if !hasMore {
-				break
-			}
+		items = make([]interface{}, 0, from.Accumulator.FastMap.Count())
+		from.Accumulator.FastMap.Iter(func(k any, value any) (stop bool) {
 			items = append(items, value)
-		}
+			return false
+		})
 	} else if len(from.Accumulator.Map) > 0 {
 		items = make([]interface{}, 0, len(from.Accumulator.Map))
 		for _, value := range from.Accumulator.Map {
@@ -689,9 +685,9 @@ func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) er
 
 	err := s.collectAll(items, dest)
 	if err != nil {
-		fmt.Printf("mergebatches: merging to master batch with error: %v, %v\n", len(items), err)
+		//fmt.Printf("mergebatches: merging to master batch with error: %v, %v\n", len(items), err)
 	} else {
-		fmt.Printf("mergebatches: merging to master batch: %v\n", len(items))
+		//fmt.Printf("mergebatches: merging to master batch: %v\n", len(items))
 	}
 
 	if err != nil {

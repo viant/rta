@@ -3,10 +3,12 @@ module github.com/viant/rta
 go 1.21.6
 
 require (
+	github.com/dolthub/swiss v0.2.1
 	github.com/francoispqt/gojay v1.2.13
 	github.com/google/gops v0.3.23
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.14
+	github.com/mhmtszr/concurrent-swiss-map v1.0.8
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
 	github.com/viant/afs v1.16.1-0.20220601210902-dc23d64dda15
@@ -27,6 +29,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/aerospike/aerospike-client-go v4.5.2+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect

@@ -251,12 +251,13 @@ func mapperFn(accumulator *Accumulator) interface{} {
 	accumulator.Lock()
 	defer accumulator.Unlock()
 	if accumulator.UseFastMap {
-		idx := 0
-		hasFreeVal := false
-		for i := 0; i < accumulator.FastMap.Size(); i++ {
-			_, v, _ := accumulator.FastMap.Value(&idx, &hasFreeVal)
+		i := 0
+		accumulator.FastMap.Iter(func(k any, v any) (stop bool) {
 			result[i] = v.(*Inventory)
-		}
+			i++
+			return false
+		})
+
 		return result
 	}
 
