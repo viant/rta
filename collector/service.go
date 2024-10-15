@@ -38,7 +38,7 @@ type Service struct {
 	config         *config.Config
 	fs             afs.Service
 	newRecord      func() interface{}
-	keyPtrFn       func(record interface{}, ptr interface{})
+	keyPtrFn       func(record interface{}, ptr *interface{})
 	keyFn          func(record interface{}) interface{}
 	reducerFn      func(accumulator, source interface{})
 	mapperFn       func(acc *Accumulator) interface{}

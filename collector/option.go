@@ -5,7 +5,7 @@ type (
 		streamURLSymLinkTrg string
 		instanceId          string
 		pool                *FMapPool
-		keyPtrFn            func(record interface{}, ptr interface{})
+		keyPtrFn            func(record interface{}, ptr *interface{})
 	}
 
 	Option func(o *Options)
@@ -25,7 +25,7 @@ func WithFastMapPool(pool *FMapPool) Option {
 	}
 }
 
-func WithKeyPointerFunc(fn func(record interface{}, ptr interface{})) Option {
+func WithKeyPointerFunc(fn func(record interface{}, ptr *interface{})) Option {
 	return func(o *Options) {
 		o.keyPtrFn = fn
 	}
