@@ -38,7 +38,7 @@ type Service struct {
 	config         *config.Config
 	fs             afs.Service
 	newRecord      func() interface{}
-	keyPtrFn       func(record interface{}, ptr *interface{})
+	keyPtrFn       func(record interface{}, dest interface{})
 	keyFn          func(record interface{}) interface{}
 	reducerFn      func(accumulator, source interface{})
 	mapperFn       func(acc *Accumulator) interface{}
@@ -223,9 +223,16 @@ func (s *Service) collectAll(records []interface{}, batch *Batch) error {
 	if len(records) == 0 {
 		return nil
 	}
-	key := s.keyFn(records[0])
+
+	var key interface{}
+	if s.keyPtrFn != nil {
+		key = s.keyFn(records[0])
+		if intKey, ok := key.(int); ok {
+			key = &intKey
+		}
+	}
 	for i := range records { //collect all to memory
-		s.reduce(data, records[i], &key)
+		s.reduce(data, records[i], key)
 	}
 	if s.config.StreamDisabled {
 		return nil
@@ -307,11 +314,15 @@ func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error)
 	return encProvider, err
 }
 
-func (s *Service) reduce(acc *Accumulator, record interface{}, keyPtr *interface{}) {
+func (s *Service) reduce(acc *Accumulator, record interface{}, dest interface{}) {
 	var key interface{}
-	if s.keyPtrFn != nil {
-		s.keyPtrFn(record, keyPtr)
-		key = *keyPtr
+	if dest != nil {
+		s.keyPtrFn(record, dest)
+		if intKey, ok := dest.(*int); ok {
+			key = *intKey
+		} else {
+			key = s.keyFn(record)
+		}
 	} else {
 		key = s.keyFn(record)
 	}
