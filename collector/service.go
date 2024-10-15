@@ -38,6 +38,7 @@ type Service struct {
 	config         *config.Config
 	fs             afs.Service
 	newRecord      func() interface{}
+	keyPtrFn       func(record interface{}, ptr interface{})
 	keyFn          func(record interface{}) interface{}
 	reducerFn      func(accumulator, source interface{})
 	mapperFn       func(acc *Accumulator) interface{}
@@ -219,8 +220,12 @@ func (s *Service) CollectAll(records ...interface{}) error {
 
 func (s *Service) collectAll(records []interface{}, batch *Batch) error {
 	data := batch.Accumulator
+	if len(records) == 0 {
+		return nil
+	}
+	key := s.keyFn(records[0])
 	for i := range records { //collect all to memory
-		s.reduce(data, records[i])
+		s.reduce(data, records[i], &key)
 	}
 	if s.config.StreamDisabled {
 		return nil
@@ -249,7 +254,6 @@ var testCounter = int32(0)
 
 func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 	message := s.Provider.NewMessage()
-
 	enc, ok := record.(io.Encoder)
 	if !ok {
 		provider, err := s.encoderProvider(record)
@@ -303,9 +307,15 @@ func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error)
 	return encProvider, err
 }
 
-func (s *Service) reduce(acc *Accumulator, record interface{}) {
-	key := s.keyFn(record)
-	if key == "" {
+func (s *Service) reduce(acc *Accumulator, record interface{}, keyPtr *interface{}) {
+	var key interface{}
+	if s.keyPtrFn != nil {
+		s.keyPtrFn(record, keyPtr)
+		key = *keyPtr
+	} else {
+		key = s.keyFn(record)
+	}
+	if key == nil {
 		return
 	}
 	accumulator, ok := acc.GetOrCreate(key, s.newRecord)
@@ -420,7 +430,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 			failed++
 			continue
 		}
-		s.reduce(acc, record)
+		s.reduce(acc, record, nil)
 	}
 	batchID := shared.BatchID(URL)
 	data := s.mapperFn(acc)
@@ -681,9 +691,7 @@ func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) er
 
 	err := s.collectAll(items, dest)
 	if err != nil {
-		//fmt.Printf("mergebatches: merging to master batch with error: %v, %v\n", len(items), err)
-	} else {
-		//fmt.Printf("mergebatches: merging to master batch: %v\n", len(items))
+		fmt.Printf("mergebatches: merging to master batch with error: %v, %v\n", len(items), err)
 	}
 
 	if err != nil {
