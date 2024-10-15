@@ -513,6 +513,7 @@ func New(config *config.Config,
 	reducer func(key, source interface{}),
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service, options ...Option) (*Service, error) {
+	opts := NewOptions(options...)
 	srv := &Service{
 		config:     config,
 		fs:         afs.New(),
@@ -524,7 +525,8 @@ func New(config *config.Config,
 		Provider:   msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 		metrics:    metrics,
 		options:    options,
-		instanceId: NewOptions(options...).GetInstanceId(),
+		instanceId: opts.GetInstanceId(),
+		keyPtrFn:   opts.keyPtrFn,
 	}
 
 	if config.UseFastMap {
