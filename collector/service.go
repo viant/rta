@@ -692,7 +692,7 @@ func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) er
 
 	err := s.collectAll(items, dest)
 	if err != nil {
-		fmt.Printf("mergebatches: merging to master batch with error: %v, %v\n", len(items), err)
+		fmt.Printf("failed to merge to master batch with error: %v, %v\n", len(items), err)
 	}
 
 	if err != nil {

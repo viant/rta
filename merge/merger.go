@@ -104,7 +104,7 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 		_ = tx.Rollback()
 		stats.Append(err)
 		if s.config.Debug {
-			fmt.Printf("fail merge table %v due to: %v\n", jn.TempTableName, err)
+			fmt.Printf("failed merge table %v due to: %v\n", jn.TempTableName, err)
 		}
 		return err
 	}
