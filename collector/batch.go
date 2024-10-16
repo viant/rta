@@ -74,19 +74,22 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 	var data interface{}
 	var ok bool
 	if a.UseFastMap {
-		a.RWMutex.RLock()
-		data, ok = a.FastMap.Get(key)
-		a.RWMutex.RUnlock()
-		if !ok {
-			a.RWMutex.Lock()
+		data, ok = a.tryGet(key)
+		if !ok || data == nil {
+			a.RWMutex.RLock()
 			data, ok = a.FastMap.Get(key)
+			a.RWMutex.RUnlock()
 			if !ok {
-				data = get()
-				ok = true
-				a.FastMap.Put(key, data)
-				atomic.StoreUint32(&a.size, uint32(a.FastMap.Count()))
+				a.RWMutex.Lock()
+				data, ok = a.FastMap.Get(key)
+				if !ok {
+					data = get()
+					ok = true
+					a.FastMap.Put(key, data)
+					atomic.StoreUint32(&a.size, uint32(a.FastMap.Count()))
+				}
+				a.RWMutex.Unlock()
 			}
-			a.RWMutex.Unlock()
 		}
 	} else {
 		a.RWMutex.RLock()
@@ -107,12 +110,19 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 	return data, ok
 }
 
-func (a *Accumulator) funcName(key interface{}, data interface{}, ok bool) (interface{}, bool, bool) {
+func (a *Accumulator) tryGet(key interface{}) (data interface{}, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+		}
+	}()
 	scn := fmap.Residents(a.FastMap)
 	data, ok = a.FastMap.Get(key)
 	next := fmap.Residents(a.FastMap)
 	hasChanged := scn != next
-	return data, ok, hasChanged
+	if hasChanged {
+		ok = false
+	}
 }
 
 func (a *Accumulator) Put(key, value interface{}) interface{} {
