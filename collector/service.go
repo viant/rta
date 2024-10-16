@@ -224,15 +224,8 @@ func (s *Service) collectAll(records []interface{}, batch *Batch) error {
 		return nil
 	}
 
-	var key interface{}
-	if s.keyPtrFn != nil {
-		key = s.keyFn(records[0])
-		if intKey, ok := key.(int); ok {
-			key = &intKey
-		}
-	}
 	for i := range records { //collect all to memory
-		s.reduce(data, records[i], key)
+		s.reduce(data, records[i])
 	}
 	if s.config.StreamDisabled {
 		return nil
@@ -314,18 +307,8 @@ func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error)
 	return encProvider, err
 }
 
-func (s *Service) reduce(acc *Accumulator, record interface{}, dest interface{}) {
-	var key interface{}
-	if dest != nil {
-		s.keyPtrFn(record, dest)
-		if intKey, ok := dest.(*int); ok {
-			key = *intKey
-		} else {
-			key = s.keyFn(record)
-		}
-	} else {
-		key = s.keyFn(record)
-	}
+func (s *Service) reduce(acc *Accumulator, record interface{}) {
+	key := s.keyFn(record)
 	if key == nil {
 		return
 	}
@@ -359,8 +342,7 @@ func (s *Service) Flush(batch *Batch) error {
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
-
-		fmt.Printf("flushing batch: %v data len: %v %v\n", batch.ID, batch.Accumulator.Len())
+		fmt.Printf("flushing batch: %v data len: %v\n", batch.ID, batch.Accumulator.Len())
 		//fmt.Printf("flushing batch: %v data %v %v\n", batchID, s.config.Loader.Dest, s.config.Loader.CreateDDL) //TODO delete this line
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
@@ -444,7 +426,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 			failed++
 			continue
 		}
-		s.reduce(acc, record, nil)
+		s.reduce(acc, record)
 	}
 	batchID := shared.BatchID(URL)
 	data := s.mapperFn(acc)
