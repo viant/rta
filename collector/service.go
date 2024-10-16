@@ -666,6 +666,7 @@ func (s *Service) watchActiveBatch() {
 		}
 
 		if !batch.IsActive(s.config.Batch) && !batch.HasPendingTransaction() {
+			fmt.Printf("active batch is not active, scheduling for flush %v span: %s ,count: %v\n", s.config.Loader.Dest, batch.flushAfter.Sub(batch.started), batch.Accumulator.Len())
 			s.scheduleBatch(false, batch)
 			s.activeBatch = nil
 		}

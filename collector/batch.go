@@ -21,7 +21,8 @@ import (
 
 type (
 	Batch struct {
-		ID string
+		ID      string
+		started time.Time
 		*tconfig.Stream
 		Accumulator *Accumulator
 		Started     time.Time
@@ -196,6 +197,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 	symLinkStreamURLTrg := opts.GetStreamURLSymLinkTrg()
 	if disabled {
 		return &Batch{
+			started:           time.Now(),
 			PendingURL:        pendingURL,
 			ID:                UUID.String(),
 			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
