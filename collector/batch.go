@@ -123,6 +123,7 @@ func (a *Accumulator) tryGet(key interface{}) (data interface{}, ok bool) {
 	if hasChanged {
 		ok = false
 	}
+	return data, ok
 }
 
 func (a *Accumulator) Put(key, value interface{}) interface{} {
