@@ -473,6 +473,9 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 
 	return nil
 }
+func (s *Service) Config() *config.Config {
+	return s.config
+}
 
 func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
 	s.loadMux.Lock()
