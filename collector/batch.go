@@ -74,10 +74,10 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 	var data interface{}
 	var ok bool
 	if a.UseFastMap {
-		scn := fmap.Residents(a.FastMap)
-		data, ok = a.FastMap.Get(key)
-		next := fmap.Residents(a.FastMap)
-		if scn != next || !ok || data == nil {
+
+		data, ok = a.tryGet(key)
+
+		if !ok || data == nil {
 			a.RWMutex.RLock()
 			data, ok = a.FastMap.Get(key)
 			a.RWMutex.RUnlock()
@@ -110,6 +110,22 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 		}
 	}
 	return data, ok
+}
+
+func (a *Accumulator) tryGet(key interface{}) (data interface{}, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+		}
+	}()
+	scn := fmap.Residents(a.FastMap)
+	data, ok = a.FastMap.Get(key)
+	next := fmap.Residents(a.FastMap)
+	hasChanged := scn != next
+	if hasChanged {
+		ok = false
+	}
+	return
 }
 
 func (a *Accumulator) Put(key, value interface{}) interface{} {
