@@ -359,6 +359,9 @@ func (s *Service) Flush(batch *Batch) error {
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
+
+		fmt.Printf("flushing batch: %v data len: %v %v\n", batch.ID, batch.Accumulator.Len())
+		//fmt.Printf("flushing batch: %v data %v %v\n", batchID, s.config.Loader.Dest, s.config.Loader.CreateDDL) //TODO delete this line
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
 			stats.Append(err)
@@ -480,7 +483,6 @@ func (s *Service) load(ctx context.Context, data interface{}, batchID string) er
 	if delay != time.Duration(0) {
 		time.Sleep(delay)
 	}
-	fmt.Printf("flushing batch: %v %v %v\n", batchID, s.config.Loader.Dest, s.config.Loader.CreateDDL)
 
 	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId))
 	s.loadCount++
