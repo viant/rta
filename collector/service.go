@@ -480,6 +480,7 @@ func (s *Service) load(ctx context.Context, data interface{}, batchID string) er
 	if delay != time.Duration(0) {
 		time.Sleep(delay)
 	}
+	fmt.Printf("flushing batch: %v %v %v\n", batchID, s.config.Loader.Dest, s.config.Loader.CreateDDL)
 
 	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId))
 	s.loadCount++
