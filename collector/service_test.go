@@ -257,7 +257,6 @@ func mapperFn(accumulator *Accumulator) interface{} {
 			i++
 			return false
 		})
-
 		return result
 	}
 

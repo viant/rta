@@ -9,6 +9,7 @@ import (
 	"github.com/viant/afs/file"
 	"github.com/viant/afs/url"
 	"github.com/viant/rta/collector/config"
+	"github.com/viant/rta/collector/fmap"
 	"github.com/viant/rta/shared"
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/tapper/log"
@@ -73,6 +74,10 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 	var data interface{}
 	var ok bool
 	if a.UseFastMap {
+		data, ok = a.tryGet(key)
+		if ok && data != nil {
+			return data, ok
+		}
 		a.RWMutex.RLock()
 		data, ok = a.FastMap.Get(key)
 		a.RWMutex.RUnlock()
@@ -104,6 +109,23 @@ func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (inte
 		}
 	}
 	return data, ok
+}
+
+func (a *Accumulator) tryGet(key interface{}) (data interface{}, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+			data = nil
+		}
+	}()
+	scn := fmap.Residents(a.FastMap)
+	data, ok = a.FastMap.Get(key)
+	next := fmap.Residents(a.FastMap)
+	hasChanged := scn != next
+	if hasChanged {
+		ok = false
+	}
+	return
 }
 
 func (a *Accumulator) Put(key, value interface{}) interface{} {
