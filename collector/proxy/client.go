@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,17 +22,6 @@ func (c *Client) Load(ctx context.Context, data interface{}, batchID string, opt
 	request := &Request{BatchID: batchID, Records: data}
 	httpClient := c.httpClient(&c.config.Endpoint)
 	httpRequest, err := request.httpRequest(&c.config.Endpoint)
-	/// 1
-	// Read the request body into a buffer
-	bodyBuffer, _ := ioutil.ReadAll(httpRequest.Body)
-
-	// Print the request body
-	fmt.Printf("rta-proxy-client-load: request body size: %d, content: %s", len(bodyBuffer), string(bodyBuffer))
-
-	// Reset the request body
-	httpRequest.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBuffer))
-	/// 2
-
 	if err != nil {
 		return err
 	}

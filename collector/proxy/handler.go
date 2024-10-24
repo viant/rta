@@ -86,7 +86,6 @@ func (h *Handler) Handle(data []byte) error {
 	request := &Request{}
 	request.Records = sliceValuePtr.Interface()
 	if err := gojay.Unmarshal(data, request); err != nil {
-		fmt.Printf("rta-proxy-handler-handle: unmarshal error: %v, data size: %d data: %s", err, len(data), string(data))
 		return err
 	}
 
