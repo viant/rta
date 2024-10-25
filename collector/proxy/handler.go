@@ -86,6 +86,11 @@ func (h *Handler) Handle(data []byte) error {
 	request := &Request{}
 	request.Records = sliceValuePtr.Interface()
 	if err := gojay.Unmarshal(data, request); err != nil {
+		collectorId := ""
+		if len(h.collectors) > 0 {
+			collectorId = h.collectors[0].ID()
+		}
+		err = fmt.Errorf("rta collector proxy handler (collector id: %v) - unmarshal error: %w", collectorId, err)
 		return err
 	}
 
