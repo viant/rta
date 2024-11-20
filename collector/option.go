@@ -1,11 +1,15 @@
 package collector
 
+import loader2 "github.com/viant/rta/collector/loader"
+
 type (
 	Options struct {
 		streamURLSymLinkTrg string
 		instanceId          string
 		pool                *FMapPool
 		keyPtrFn            func(record interface{}, ptr interface{})
+		fsLoader            loader2.Loader
+		category            string
 	}
 
 	Option func(o *Options)
@@ -43,6 +47,18 @@ func WithInstanceId(instanceId string) Option {
 	}
 }
 
+func WithCategory(category string) Option {
+	return func(o *Options) {
+		o.category = category
+	}
+}
+
+func WithFsLoader(loader loader2.Loader) Option {
+	return func(o *Options) {
+		o.fsLoader = loader
+	}
+}
+
 func (o *Options) Apply(opts ...Option) {
 	if len(opts) == 0 {
 		return
@@ -58,4 +74,12 @@ func (o *Options) GetStreamURLSymLinkTrg() string {
 
 func (o *Options) GetInstanceId() string {
 	return o.instanceId
+}
+
+func (o *Options) Category() string {
+	return o.category
+}
+
+func (o *Options) FsLoader() loader2.Loader {
+	return o.fsLoader
 }

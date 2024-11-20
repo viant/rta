@@ -43,6 +43,7 @@ type Service struct {
 	reducerFn      func(accumulator, source interface{})
 	mapperFn       func(acc *Accumulator) interface{}
 	loader         loader2.Loader
+	fsLoader       loader2.Loader
 	activeBatch    *Batch
 	flushScheduled []*Batch
 	mux            sync.RWMutex
@@ -60,6 +61,7 @@ type Service struct {
 	randGenerator       *rand.Rand
 	loadCount           int
 	fastMapPool         *FMapPool
+	category            string
 }
 
 func (s *Service) NotifyWatcher() {
@@ -348,6 +350,14 @@ func (s *Service) Flush(batch *Batch) error {
 			return err
 		}
 
+		if s.fsLoader != nil {
+			err := s.fsLoader.Load(ctx, data, batch.ID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
+			if err != nil {
+				err := fmt.Errorf("flush - warning: failed to post load: %w", err)
+				log.Println(err.Error())
+				stats.Append(err)
+			}
+		}
 	}
 	return s.closeBatch(ctx, batch)
 
@@ -439,6 +449,15 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 		return nil // avoid deleting files
 	}
 
+	if s.fsLoader != nil {
+		fsLoadErr := s.fsLoader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
+		if err != nil {
+			postLoadErr := fmt.Errorf("replaybatch - warning: failed to post load: %w", fsLoadErr)
+			log.Println(postLoadErr.Error())
+			stats.Append(postLoadErr)
+		}
+	}
+
 	// delete regular file
 	if symLinkStreamURLTrgBase != "" {
 		_, fileName := url.Split(URL, file.Scheme)
@@ -467,7 +486,7 @@ func (s *Service) load(ctx context.Context, data interface{}, batchID string) er
 		time.Sleep(delay)
 	}
 
-	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId))
+	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
 	s.loadCount++
 	go func() {
 		time.Sleep(2 * time.Microsecond)
@@ -500,6 +519,9 @@ func New(config *config.Config,
 	mapper func(accumulator *Accumulator) interface{},
 	loader loader2.Loader, metrics *gmetric.Service, options ...Option) (*Service, error) {
 	opts := NewOptions(options...)
+
+	fsLoader := opts.FsLoader()
+
 	srv := &Service{
 		config:     config,
 		fs:         afs.New(),
@@ -508,11 +530,13 @@ func New(config *config.Config,
 		reducerFn:  reducer,
 		mapperFn:   mapper,
 		loader:     loader,
+		fsLoader:   fsLoader,
 		Provider:   msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
 		metrics:    metrics,
 		options:    options,
 		instanceId: opts.GetInstanceId(),
 		keyPtrFn:   opts.keyPtrFn,
+		category:   opts.Category(),
 	}
 
 	if config.UseFastMap {

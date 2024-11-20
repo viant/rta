@@ -3,6 +3,7 @@ package loader
 type (
 	Options struct {
 		instanceId string
+		category   string
 	}
 
 	Option func(o *Options)
@@ -22,6 +23,12 @@ func WithInstanceId(instanceId string) Option {
 	}
 }
 
+func WithCategory(category string) Option {
+	return func(o *Options) {
+		o.category = category
+	}
+}
+
 func (o *Options) Apply(opts ...Option) {
 	if len(opts) == 0 {
 		return
@@ -33,4 +40,8 @@ func (o *Options) Apply(opts ...Option) {
 
 func (o *Options) GetInstanceId() string {
 	return o.instanceId
+}
+
+func (o *Options) Category() string {
+	return o.category
 }

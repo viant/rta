@@ -5,6 +5,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/viant/afs"
 	"github.com/viant/rta/load/config"
+	fslconfig "github.com/viant/rta/loadfs/config"
 	"github.com/viant/rta/shared"
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/toolbox"
@@ -16,6 +17,7 @@ import (
 type Config struct {
 	ID                  string
 	Loader              *config.Config
+	FsLoader            *fslconfig.Config
 	Stream              *tconfig.Stream
 	UseFastMap          bool
 	FastMapSize         int
