@@ -2,17 +2,24 @@ package loadfs
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"github.com/viant/afs"
 	"github.com/viant/rta/collector/loader"
+	"github.com/viant/rta/domain"
 	"github.com/viant/rta/loadfs/config"
+	"github.com/viant/rta/shared"
+	"github.com/viant/sqlx/io/insert"
+	"github.com/viant/sqlx/metadata/info/dialect"
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/tapper/io"
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
 	tjson "github.com/viant/tapper/msg/json"
+	stdio "io"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,6 +27,7 @@ import (
 // Service represents a file system loader service
 type Service struct {
 	config      *config.Config
+	hostIP      string
 	fs          afs.Service
 	format      Format
 	msgProvider *msg.Provider
@@ -29,7 +37,7 @@ type Service struct {
 
 // Load loads data into the file system
 func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
-	logger, err := s.logger(options, batchID)
+	logger, destURL, err := s.logger(options, batchID)
 	if err != nil {
 		return err
 	}
@@ -39,6 +47,27 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string, op
 	err = s.load(data, logger)
 	if err != nil {
 		return err
+	}
+
+	err = s.insertToJournalIfNeeded(ctx, destURL, batchID)
+
+	return err
+}
+
+func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, batchID string) error {
+	if s.config.ConnectionJn == nil {
+		return nil
+	}
+
+	dbJn, err := s.config.ConnectionJn.OpenDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeWithErrorHandling(dbJn, &err)
+
+	err = s.insertToJournal(ctx, dbJn, destURL, batchID)
+	if err != nil {
+		return fmt.Errorf("failed to insert into journal table %s due to: %w", s.config.JournalTable, err)
 	}
 
 	return nil
@@ -62,7 +91,7 @@ func (s *Service) load(data interface{}, logger *log.Logger) error {
 	return nil
 }
 
-func (s *Service) logger(options []loader.Option, batchID string) (*log.Logger, error) {
+func (s *Service) logger(options []loader.Option, batchID string) (*log.Logger, string, error) {
 	t := time.Now().UTC()
 	collectorInstanceId := loader.NewOptions(options...).GetInstanceId()
 	category := loader.NewOptions(options...).Category()
@@ -76,10 +105,10 @@ func (s *Service) logger(options []loader.Option, batchID string) (*log.Logger, 
 
 	result, err := log.New(aConfig, "", afs.New())
 	if err != nil {
-		return nil, fmt.Errorf("rta loader: unable to create logger due to: %w", err)
+		return nil, "", fmt.Errorf("rta fs loader: unable to create logger due to: %w", err)
 	}
 
-	return result, nil
+	return result, URL, nil
 }
 
 func (s *Service) loadEntry(record interface{}, logger *log.Logger) error {
@@ -144,21 +173,76 @@ func New(cfg *config.Config) (*Service, error) {
 }
 
 func (s *Service) init() error {
+	var err error
 	s.fs = afs.New()
+	s.hostIP, err = shared.GetLocalIPv4()
+	if err != nil {
+		return err
+	}
+	if s.hostIP == "::1" {
+		s.hostIP = "127.0.0.1"
+	}
 	s.msgProvider = msg.NewProvider(s.config.MaxMessageSize, s.config.Concurrency, tjson.New)
+
+	err = s.ensureJnTableIfNeeded()
+	if err != nil {
+		return err
+	}
+
 	return s.format.Init(s.config.URL)
 }
 
-func closeWithErrorHandling(l *log.Logger, err *error) {
-	if l == nil {
+func (s *Service) ensureJnTableIfNeeded() error {
+	if s.config.ConnectionJn == nil {
+		return nil
+	}
+
+	ctx := context.Background()
+	dbJn, err := s.config.ConnectionJn.OpenDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer dbJn.Close()
+
+	DDL := strings.TrimSpace(s.config.CreateJnDDL)
+	if len(DDL) > 0 {
+		_, err = dbJn.ExecContext(ctx, DDL)
+	}
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func closeWithErrorHandling(c stdio.Closer, err *error) {
+	if c == nil {
 		return
 	}
 
-	if cerr := l.Close(); cerr != nil {
-		if *err != nil {
-			*err = fmt.Errorf("%w; also failed to close: %v", *err, cerr)
+	if cerr := c.Close(); cerr != nil {
+		if err != nil && *err != nil {
+			*err = fmt.Errorf("%w; close error: %v", *err, cerr)
 		} else {
 			*err = cerr
 		}
 	}
+}
+
+func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL string, batchID string) error {
+	jnTable := s.config.JournalTable
+	insert, err := insert.New(ctx, db, jnTable)
+	if err != nil {
+		return err
+	}
+	ts := time.Now()
+	journal := &domain.JournalFs{
+		Ip:           s.hostIP,
+		BatchID:      batchID,
+		Status:       shared.Active,
+		TempLocation: destURL,
+		Created:      &ts,
+	}
+	_, _, err = insert.Exec(ctx, journal, dialect.PresetIDStrategyIgnore)
+	return err
 }

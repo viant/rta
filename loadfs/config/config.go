@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/viant/rta/config"
 	"github.com/viant/rta/shared"
 )
 
@@ -12,6 +13,9 @@ type Config struct {
 	StreamUpload   bool
 	MaxMessageSize int
 	Concurrency    int
+	ConnectionJn   *config.Connection
+	JournalTable   string
+	CreateJnDDL    string
 }
 
 // Validate checks if the configuration is valid
@@ -19,6 +23,13 @@ func (c *Config) Validate() error {
 	if c.URL == "" {
 		return fmt.Errorf("loader config validation: URL was empty")
 	}
+	if c.JournalTable == "" && c.ConnectionJn != nil {
+		return fmt.Errorf("loader config validation: JournalTable was empty")
+	}
+	if c.JournalTable != "" && c.ConnectionJn == nil {
+		return fmt.Errorf("loader config validation: ConnectionJn was nil")
+	}
+
 	return nil
 }
 
@@ -32,4 +43,12 @@ func (c *Config) Init() error {
 		c.Concurrency = shared.DefaultConcurrency
 	}
 	return nil
+}
+
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	ret := *c
+	return &ret
 }

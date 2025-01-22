@@ -261,8 +261,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		return nil, err
 	}
 	return &Batch{
-		PendingURL: pendingURL,
-
+		PendingURL:        pendingURL,
 		ID:                UUID.String(),
 		Stream:            batchSteam,
 		Accumulator:       NewAccumulator(opts.pool),

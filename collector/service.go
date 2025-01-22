@@ -346,16 +346,17 @@ func (s *Service) Flush(batch *Batch) error {
 		data := s.mapperFn(batch.Accumulator)
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
-			stats.Append(err)
-			return err
+			err2 := fmt.Errorf("load error (rows cnt: %d, collector [instance: %s, category: %s], batch id: %s) due to: %w", batch.Accumulator.Len(), s.instanceId, s.category, batch.ID, err)
+			stats.Append(err2)
+			return err2
 		}
 
 		if s.fsLoader != nil {
 			err := s.fsLoader.Load(ctx, data, batch.ID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
 			if err != nil {
-				err := fmt.Errorf("flush - warning: failed to post load: %w", err)
-				log.Println(err.Error())
-				stats.Append(err)
+				err2 := fmt.Errorf("flush warning: failed to fs load (rows cnt: %d, collector [instance: %s, category: %s], batch id: %s) due to: %w", batch.Accumulator.Len(), s.instanceId, s.category, batch.ID, err)
+				log.Println(err2.Error())
+				stats.Append(err2)
 			}
 		}
 	}

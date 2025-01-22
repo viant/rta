@@ -35,6 +35,9 @@ type Config struct {
 func (c *Config) Clone() *Config {
 	var result = *c
 	result.Loader = c.Loader.Clone()
+	if c.FsLoader != nil {
+		result.FsLoader = c.FsLoader.Clone()
+	}
 	stream := c.Stream
 	if stream != nil {
 		s := *stream
