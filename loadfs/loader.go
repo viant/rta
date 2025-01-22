@@ -17,7 +17,6 @@ import (
 	"github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
 	tjson "github.com/viant/tapper/msg/json"
-	stdio "io"
 	"reflect"
 	"strings"
 	"sync"
@@ -42,7 +41,7 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string, op
 		return err
 	}
 
-	defer closeWithErrorHandling(logger, &err)
+	defer shared.CloseWithErrorHandling(logger, &err)
 
 	err = s.load(data, logger)
 	if err != nil {
@@ -63,7 +62,7 @@ func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, b
 	if err != nil {
 		return err
 	}
-	defer closeWithErrorHandling(dbJn, &err)
+	defer shared.CloseWithErrorHandling(dbJn, &err)
 
 	err = s.insertToJournal(ctx, dbJn, destURL, batchID)
 	if err != nil {
@@ -202,7 +201,7 @@ func (s *Service) ensureJnTableIfNeeded() error {
 	if err != nil {
 		return err
 	}
-	defer closeWithErrorHandling(dbJn, &err)
+	defer shared.CloseWithErrorHandling(dbJn, &err)
 
 	DDL := strings.TrimSpace(s.config.CreateJnDDL)
 	if len(DDL) > 0 {
@@ -210,20 +209,6 @@ func (s *Service) ensureJnTableIfNeeded() error {
 	}
 
 	return err
-}
-
-func closeWithErrorHandling(c stdio.Closer, err *error) {
-	if c == nil {
-		return
-	}
-
-	if cerr := c.Close(); cerr != nil {
-		if err != nil && *err != nil {
-			*err = fmt.Errorf("%w; close error: %v", *err, cerr)
-		} else {
-			*err = cerr
-		}
-	}
 }
 
 func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL string, batchID string) error {

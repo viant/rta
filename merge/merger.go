@@ -146,7 +146,7 @@ func (s *Service) processJournal(ctx context.Context, jn *domain.Journal, db *sq
 	}
 
 	if s.config.Debug {
-		fmt.Printf("success drop  table %v\n", jn.TempTableName)
+		fmt.Printf("success drop table %v\n", jn.TempTableName)
 	}
 
 	return nil
