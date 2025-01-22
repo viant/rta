@@ -252,17 +252,15 @@ func (b *BackupError) Error() string {
 	return fmt.Sprintf("failed to backup log: failed: %v of %v, due to %v", b.Failed, b.Total, b.err)
 }
 
-var testCounter = int32(0)
-
 func (s *Service) backupLogEntry(record interface{}, batch *Batch) error {
 	message := s.Provider.NewMessage()
 	enc, ok := record.(io.Encoder)
 	if !ok {
-		provider, err := s.encoderProvider(record)
+		aProvider, err := s.encoderProvider(record)
 		if err != nil {
 			return err
 		}
-		enc = provider.New(record)
+		enc = aProvider.New(record)
 	}
 	enc.Encode(message)
 

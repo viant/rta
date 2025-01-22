@@ -202,17 +202,14 @@ func (s *Service) ensureJnTableIfNeeded() error {
 	if err != nil {
 		return err
 	}
-	defer dbJn.Close()
+	defer closeWithErrorHandling(dbJn, &err)
 
 	DDL := strings.TrimSpace(s.config.CreateJnDDL)
 	if len(DDL) > 0 {
 		_, err = dbJn.ExecContext(ctx, DDL)
 	}
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 func closeWithErrorHandling(c stdio.Closer, err *error) {
@@ -231,7 +228,7 @@ func closeWithErrorHandling(c stdio.Closer, err *error) {
 
 func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL string, batchID string) error {
 	jnTable := s.config.JournalTable
-	insert, err := insert.New(ctx, db, jnTable)
+	inserter, err := insert.New(ctx, db, jnTable)
 	if err != nil {
 		return err
 	}
@@ -243,6 +240,6 @@ func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL strin
 		TempLocation: destURL,
 		Created:      &ts,
 	}
-	_, _, err = insert.Exec(ctx, journal, dialect.PresetIDStrategyIgnore)
+	_, _, err = inserter.Exec(ctx, journal, dialect.PresetIDStrategyIgnore)
 	return err
 }
