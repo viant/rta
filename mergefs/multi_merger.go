@@ -70,7 +70,7 @@ func (m *MultiMerger) Merge(ctx context.Context) error {
 	var err error
 	var mux sync.Mutex
 	wg := sync.WaitGroup{}
-	for i, _ := range m.mergers {
+	for i := range m.mergers {
 		merger := m.mergers[i]
 		wg.Add(1)
 		go func() {

@@ -9,11 +9,6 @@ const pkg = "github.com/viant/rta/mergefs/registry"
 
 var registry = x.NewRegistry()
 
-// Register registers a type with options
-func Register(t *x.Type) {
-	registry.Register(t)
-}
-
 // Registry returns extension registry
 func Registry() *x.Registry {
 	return registry
