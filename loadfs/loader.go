@@ -3,6 +3,7 @@ package loadfs
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/viant/afs"
 	"github.com/viant/rta/collector/loader"
@@ -35,13 +36,13 @@ type Service struct {
 }
 
 // Load loads data into the file system
-func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
+func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) (err error) {
 	logger, destURL, err := s.logger(options, batchID)
 	if err != nil {
 		return err
 	}
 
-	defer shared.CloseWithErrorHandling(logger, &err)
+	defer func() { err = errors.Join(err, logger.Close()) }()
 
 	err = s.load(data, logger)
 	if err != nil {
@@ -53,7 +54,7 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string, op
 	return err
 }
 
-func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, batchID string) error {
+func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, batchID string) (err error) {
 	if s.config.ConnectionJn == nil {
 		return nil
 	}
@@ -62,7 +63,7 @@ func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, b
 	if err != nil {
 		return err
 	}
-	defer shared.CloseWithErrorHandling(dbJn, &err)
+	defer func() { err = errors.Join(err, dbJn.Close()) }()
 
 	err = s.insertToJournal(ctx, dbJn, destURL, batchID)
 	if err != nil {
@@ -191,7 +192,7 @@ func (s *Service) init() error {
 	return s.format.Init(s.config.URL)
 }
 
-func (s *Service) ensureJnTableIfNeeded() error {
+func (s *Service) ensureJnTableIfNeeded() (err error) {
 	if s.config.ConnectionJn == nil {
 		return nil
 	}
@@ -201,7 +202,7 @@ func (s *Service) ensureJnTableIfNeeded() error {
 	if err != nil {
 		return err
 	}
-	defer shared.CloseWithErrorHandling(dbJn, &err)
+	defer func() { err = errors.Join(err, dbJn.Close()) }()
 
 	DDL := strings.TrimSpace(s.config.CreateJnDDL)
 	if len(DDL) > 0 {

@@ -1,27 +1,9 @@
 package shared
 
-import (
-	"fmt"
-	"io"
-)
-
 const (
-	Active   = 1
+	// Active status means that the record in a journal table was not processed (data was not merged)
+	Active = 1
+	// InActive status means that the record in a journal table was processed (data was merged)
 	InActive = 0
 	Deleted  = -1
 )
-
-// CloseWithErrorHandling closes the closer and handles the error
-func CloseWithErrorHandling(c io.Closer, err *error) {
-	if c == nil {
-		return
-	}
-
-	if cerr := c.Close(); cerr != nil {
-		if err != nil && *err != nil {
-			*err = fmt.Errorf("%w; close error: %v", *err, cerr)
-		} else {
-			*err = cerr
-		}
-	}
-}

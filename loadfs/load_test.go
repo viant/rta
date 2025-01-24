@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/assertly"
@@ -165,12 +166,12 @@ func recordsIntWithNoEncoder(n int) interface{} {
 	return result
 }
 
-func unmarshalFile(path string) (interface{}, error) {
+func unmarshalFile(path string) (data interface{}, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("error opening file: %w", err)
 	}
-	defer file.Close()
+	defer func() { err = errors.Join(err, file.Close()) }()
 
 	scanner := bufio.NewScanner(file)
 
