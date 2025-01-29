@@ -2,9 +2,9 @@ package registry
 
 import (
 	"bytes"
+	"encoding/json"
 	"github.com/francoispqt/gojay"
 	"strconv"
-	"strings"
 )
 
 // Signal represents a record in the signal table
@@ -32,7 +32,10 @@ func (s *Signal) UnmarshalJSONObject(dec *gojay.Decoder, k string) error {
 		}
 
 		if bytes.HasPrefix(bs, []byte("\"")) {
-			s.Value = strings.TrimSpace(string(bs[1 : len(bs)-1]))
+			err = json.Unmarshal(bs, &s.Value)
+			if err != nil {
+				return err
+			}
 		} else {
 			switch string(bs) {
 			case "true":
@@ -42,8 +45,8 @@ func (s *Signal) UnmarshalJSONObject(dec *gojay.Decoder, k string) error {
 			case "null":
 				s.Value = nil
 			default:
-				if bytes.Contains(bs, []byte(",")) {
-					s.Value, err = strconv.ParseFloat(string(bs), 32)
+				if bytes.Contains(bs, []byte(".")) {
+					s.Value, err = strconv.ParseFloat(string(bs), 64)
 				} else {
 					s.Value, err = strconv.ParseInt(string(bs), 10, 64)
 				}
