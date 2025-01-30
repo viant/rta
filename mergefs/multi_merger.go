@@ -60,9 +60,12 @@ func (m *MultiMerger) startEndpoint() {
 
 // MergeInBackground run in background MergeInBackground for all mergers
 func (m *MultiMerger) MergeInBackground() {
+	wg := sync.WaitGroup{}
 	for _, merger := range m.mergers {
-		go merger.MergeInBackground()
+		wg.Add(1)
+		go merger.MergeInBackground(&wg)
 	}
+	wg.Wait()
 }
 
 // Merge run merge function for all mergers
@@ -168,7 +171,7 @@ func ensureCounters(c *config.Config, srv *Service, name string) {
 
 func ensureLoaderConfig(c *config.Config) (lConfig *lconfig.Config, err error) {
 	ctx := context.Background()
-	product, err := detectProduct(ctx, c.JournalConnection)
+	product, err := detectProduct(ctx, c.Connection)
 	if err != nil {
 		return nil, err
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/viant/x"
 	"log"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -44,8 +45,9 @@ type Service struct {
 }
 
 // MergeInBackground merges in background
-func (s *Service) MergeInBackground() {
+func (s *Service) MergeInBackground(wg *sync.WaitGroup) {
 	timeout := s.config.Timeout()
+	defer wg.Done()
 
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
