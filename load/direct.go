@@ -163,6 +163,7 @@ func (s *Service) insertToJournalDirect(ctx context.Context, db *sql.DB, tempTab
 		Status:        shared.InActive,
 		TempTableName: tempTable,
 		Created:       &ts,
+		Updated:       &ts,
 	}
 	_, _, err = insert.Exec(ctx, journal, tx, dialect.PresetIDStrategyIgnore)
 	return err
