@@ -13,11 +13,15 @@ type Placeholder struct {
 	Name string `sqlx:"NAME"`
 }
 
-func ensurePlaceholders(c *config.Config) ([]string, error) {
+func ensurePlaceholdersIfNeeded(c *config.Config) ([]string, error) {
 	placeholders1 := []string{}
 	placeholders2 := []string{}
 
-	if c.DestPlaceholders != nil && len(c.DestPlaceholders.Placeholders) > 0 {
+	if c.DestPlaceholders == nil {
+		return placeholders1, nil
+	}
+
+	if len(c.DestPlaceholders.Placeholders) > 0 {
 		placeholders1 = c.DestPlaceholders.Placeholders
 	}
 

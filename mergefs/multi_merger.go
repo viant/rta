@@ -157,7 +157,7 @@ func New(c *config.Config) (*MultiMerger, error) {
 }
 
 func (m *MultiMerger) populateMergers(ignoreErrros bool) error {
-	result, err := ensurePlaceholders(m.config)
+	result, err := ensurePlaceholdersIfNeeded(m.config)
 	if err != nil {
 		return err
 	}
