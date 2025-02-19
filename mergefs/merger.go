@@ -30,7 +30,7 @@ import (
 const (
 	metricURI = "/v1/api/metric/"
 	alias     = "new"
-	logPrefix = "rta fsmerger -"
+	logPrefix = config.LogPrefix
 )
 
 // Service represents a merger service
@@ -42,6 +42,7 @@ type Service struct {
 	fs      afs.Service
 	xType   *x.Type
 	loader  loader.Loader
+	dbJn    *sql.DB
 }
 
 // MergeInBackground merges in background
@@ -220,18 +221,25 @@ func (s *Service) updateJn(ctx context.Context, jn *domain.JournalFs, db *sql.DB
 	return nil
 }
 
-func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) ([]*domain.JournalFs, error) {
+func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) (journals []*domain.JournalFs, err error) {
 	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v", s.config.JournalTable, shared.Active)
 	reader, err := read.New(ctx, db, querySQL, func() interface{} { return &domain.JournalFs{} })
 	if err != nil {
 		return nil, err
 	}
-	var journals []*domain.JournalFs
+
+	defer func() {
+		if stmt := reader.Stmt(); stmt != nil {
+			err = errors.Join(err, stmt.Close())
+		}
+	}()
+
 	err = reader.QueryAll(ctx, func(row interface{}) error {
 		journal := row.(*domain.JournalFs)
 		journals = append(journals, journal)
 		return nil
 	})
+
 	return journals, err
 }
 
@@ -293,20 +301,14 @@ func (s *Service) Merge(ctx context.Context) (err error) {
 		onDone(time.Now(), stats)
 	}()
 
-	dbJn, err := s.config.JournalConnection.OpenDB(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, dbJn.Close()) }()
-
-	journals, err := s.readFromJournalTable(ctx, dbJn)
+	journals, err := s.readFromJournalTable(ctx, s.dbJn)
 	if err != nil {
 		stats.Append(err)
 		return err
 	}
 
 	for _, journal := range journals {
-		if err = s.processJournal(ctx, journal, dbJn); err != nil {
+		if err = s.processJournal(ctx, journal, s.dbJn); err != nil {
 			stats.Append(err)
 		}
 	}

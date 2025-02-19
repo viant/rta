@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	DefaultTimeoutSec   = 500
-	DefaultThinkTimeSec = 1
-	logPrefix           = "rta fsmerger -"
+	defaultTimeoutSec   = 500
+	defaultThinkTimeSec = 1
+	LogPrefix           = "rta fsmerger -"
 )
 
 type (
@@ -32,11 +32,19 @@ type (
 		Endpoint          *Endpoint
 		Debug             bool
 		TypeName          string
-		DestPlaceholders  []string
+		DestPlaceholders  *DestPlaceholders
 		Mode              string
 		CreateDDL         string
 		UseInsertAPI      bool
 		BatchSize         int
+		MainLoopDelayMs   int
+		MergersRefreshMs  int
+	}
+
+	DestPlaceholders struct {
+		Placeholders []string
+		Connection   *config.Connection
+		Query        string
 	}
 
 	Endpoint struct {
@@ -46,14 +54,14 @@ type (
 
 func (c *Config) Timeout() time.Duration {
 	if c.TimeoutSec == 0 {
-		c.TimeoutSec = DefaultTimeoutSec
+		c.TimeoutSec = defaultTimeoutSec
 	}
 	return time.Second * time.Duration(c.TimeoutSec)
 }
 
 func (c *Config) ThinkTime() time.Duration {
 	if c.ThinkTimeSec == 0 {
-		c.ThinkTimeSec = DefaultThinkTimeSec
+		c.ThinkTimeSec = defaultThinkTimeSec
 	}
 	return time.Second * time.Duration(c.ThinkTimeSec)
 }
@@ -67,7 +75,7 @@ type Merge struct {
 }
 
 func (c *Config) Validate() error {
-	prefix := fmt.Sprintf("%s config validation:", logPrefix)
+	prefix := fmt.Sprintf("%s config validation:", LogPrefix)
 	required := map[string]string{
 		"JournalTable":      c.JournalTable,
 		"JournalConnection": fmt.Sprintf("%v", c.JournalConnection),
@@ -96,11 +104,36 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%s Merge was nil", prefix)
 	}
 
+	if c.DestPlaceholders != nil {
+		hasConn := c.DestPlaceholders.Connection != nil
+		hasQuery := c.DestPlaceholders.Query != ""
+
+		if hasConn && !hasQuery {
+			return fmt.Errorf("%s DestPlaceholders.Query was empty", prefix)
+		}
+
+		if !hasConn && hasQuery {
+			return fmt.Errorf("%s DestPlaceholders.Connection was nil", prefix)
+		}
+
+		if hasConn && c.DestPlaceholders.Connection.Dsn == "" {
+			return fmt.Errorf("%s DestPlaceholders.Connection.Dsn was empty", prefix)
+		}
+
+		if hasConn && c.DestPlaceholders.Connection.Driver == "" {
+			return fmt.Errorf("%s DestPlaceholders.Connection.Driver was empty", prefix)
+		}
+
+		if c.DestPlaceholders.Placeholders == nil {
+			return fmt.Errorf("%s DestPlaceholders.Placeholders was nil", prefix)
+		}
+	}
+
 	return nil
 }
 
 func NewConfigFromURL(ctx context.Context, URL string) (cfg *Config, err error) {
-	prefix := logPrefix
+	prefix := LogPrefix
 	fs := afs.New()
 	reader, err := fs.OpenURL(ctx, URL)
 	if err != nil {
@@ -128,7 +161,7 @@ func NewConfigFromURL(ctx context.Context, URL string) (cfg *Config, err error) 
 
 func (c *Config) PrepareMergeFsConfig() *Config {
 	var result = *c
-	result.DestPlaceholders = nil
+	result.DestPlaceholders = nil // regular merger config does not need placeholders
 	return &result
 }
 

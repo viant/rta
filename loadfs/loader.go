@@ -225,6 +225,7 @@ func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL strin
 		Status:       shared.Active,
 		TempLocation: destURL,
 		Created:      &ts,
+		Updated:      &ts,
 	}
 	_, _, err = inserter.Exec(ctx, journal, dialect.PresetIDStrategyIgnore)
 	return err
