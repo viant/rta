@@ -302,6 +302,7 @@ func (s *Service) Merge(ctx context.Context) (err error) {
 	readCtx, cancel := context.WithTimeout(ctx, timeout)
 	journals, err := s.readFromJournalTable(readCtx, s.dbJn)
 	if err != nil {
+		cancel()
 		stats.Append(err)
 		return err
 	}
