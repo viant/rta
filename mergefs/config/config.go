@@ -22,23 +22,24 @@ const (
 
 type (
 	Config struct {
-		Dest              string
-		Connection        *config.Connection
-		JournalTable      string
-		JournalConnection *config.Connection
-		Merge             *Merge
-		TimeoutSec        int
-		ThinkTimeSec      int
-		Endpoint          *Endpoint
-		Debug             bool
-		TypeName          string
-		DestPlaceholders  *DestPlaceholders
-		Mode              string
-		CreateDDL         string
-		UseInsertAPI      bool
-		BatchSize         int
-		MainLoopDelayMs   int
-		MergersRefreshMs  int
+		Dest               string
+		Connection         *config.Connection
+		JournalTable       string
+		JournalConnection  *config.Connection
+		Merge              *Merge
+		TimeoutSec         int
+		ThinkTimeSec       int
+		ThinkTimeJournalMs int
+		Endpoint           *Endpoint
+		Debug              bool
+		TypeName           string
+		DestPlaceholders   *DestPlaceholders
+		Mode               string
+		CreateDDL          string
+		UseInsertAPI       bool
+		BatchSize          int
+		MainLoopDelayMs    int
+		MergersRefreshMs   int
 	}
 
 	DestPlaceholders struct {
@@ -64,6 +65,10 @@ func (c *Config) ThinkTime() time.Duration {
 		c.ThinkTimeSec = defaultThinkTimeSec
 	}
 	return time.Second * time.Duration(c.ThinkTimeSec)
+}
+
+func (c *Config) ThinkTimeJournal() time.Duration {
+	return time.Millisecond * time.Duration(c.ThinkTimeJournalMs)
 }
 
 type Merge struct {

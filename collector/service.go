@@ -620,6 +620,9 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 			fmt.Println("failed to merge batch, scheduling for flush", err)
 			break
 		}
+		if s.config.Debug {
+			fmt.Printf("succesfully merged batches by collector [instance: %s, category: %s]: master: %v (rows sum: %d), candidate: %v (rows cnt: %d)\n", s.instanceId, s.category, masterBatch.ID, masterBatch.Accumulator.Len(), candidate.ID, candidate.Accumulator.Len())
+		}
 	}
 
 	err = s.Flush(masterBatch)
@@ -627,6 +630,9 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		s.scheduleBatch(true, masterBatch)
 	}
 	if err == nil {
+		if s.config.Debug {
+			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d) %v\n", s.instanceId, s.category, masterBatch.Accumulator.Len(), masterBatch.ID)
+		}
 		for i, item := range inconsistentBackup {
 			if err := s.closeBatch(ctx, item); err != nil {
 				fmt.Printf("failed to close insonsisten activeBatch %v/%v, %v", i, len(inconsistentBackup), err)

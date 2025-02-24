@@ -70,7 +70,7 @@ func (m *MultiMerger) MergeInBackground() {
 	wg := sync.WaitGroup{}
 
 	for {
-		err := m.populateMergers(true)
+		err := m.populateMergers()
 		if err != nil {
 			log.Printf("%s failed to populate mergers: %v", logPrefix, err)
 		}
@@ -147,7 +147,7 @@ func New(c *config.Config) (*MultiMerger, error) {
 		return nil, err
 	}
 
-	err = result.populateMergers(false)
+	err = result.populateMergers()
 	if err != nil {
 		return nil, fmt.Errorf("%s failed to populate mergers due to: %w", logPrefix, err)
 	}
@@ -156,7 +156,7 @@ func New(c *config.Config) (*MultiMerger, error) {
 	return result, nil
 }
 
-func (m *MultiMerger) populateMergers(ignoreErrros bool) error {
+func (m *MultiMerger) populateMergers() error {
 	result, err := ensurePlaceholdersIfNeeded(m.config)
 	if err != nil {
 		return err
@@ -176,13 +176,9 @@ func (m *MultiMerger) populateMergers(ignoreErrros bool) error {
 
 	for _, name := range newPlaceholders {
 		merger, err := m.newMerger(name)
-		if err != nil {
-			if ignoreErrros {
-				fmt.Printf("%s failed to create merger for placeholder %q: %v\n", logPrefix, name, err)
-				continue
-			} else {
-				return fmt.Errorf("failed to create merger for placeholder %q: %w", name, err)
-			}
+		if err != nil { // just print error without returning
+			fmt.Printf("%s failed to create merger for placeholder %q: %v\n", logPrefix, name, err)
+			continue
 		}
 		m.mergers = append(m.mergers, merger)
 		m.destPlaceholders = append(m.destPlaceholders, name)

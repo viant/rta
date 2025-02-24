@@ -30,6 +30,7 @@ type Config struct {
 	LoadDelaySeedPart   int
 	LoadDelayEveryNExec int
 	LoadDelayOnlyOnce   bool
+	Debug               bool
 }
 
 func (c *Config) Clone() *Config {

@@ -47,13 +47,11 @@ type Service struct {
 
 // MergeInBackground merges in background
 func (s *Service) MergeInBackground(wg *sync.WaitGroup) {
-	timeout := s.config.Timeout()
 	defer wg.Done()
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		startTime := time.Now()
-		err := s.Merge(ctx)
+		err := s.Merge(context.Background())
 		if err != nil {
 			log.Printf("%s failed to merge: %v", logPrefix, err)
 		}
@@ -62,7 +60,6 @@ func (s *Service) MergeInBackground(wg *sync.WaitGroup) {
 		if thinkTime > 0 {
 			time.Sleep(thinkTime)
 		}
-		cancel()
 	}
 }
 
@@ -83,22 +80,14 @@ func (s *Service) processJournal(ctx context.Context, journal *domain.JournalFs,
 		return err
 	}
 
-	if s.config.Debug {
-		fmt.Printf("%s successfully merged table %v with data from %v\n", logPrefix, s.config.Dest, journal.TempLocation)
-	}
-
-	err = s.deleteFile(ctx, journal.TempLocation, stats)
-	if err != nil {
-		return err
-	}
-
 	err = s.updateJn(ctx, journal, db, stats)
 	if err != nil {
 		return err
 	}
 
-	if s.config.Debug {
-		fmt.Printf("%s successfully committed table %v\n", logPrefix, s.config.JournalTable)
+	err = s.deleteFile(ctx, journal.TempLocation, stats)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -168,6 +157,10 @@ func (s *Service) load(ctx context.Context, journal *domain.JournalFs, result []
 		return err
 	}
 
+	if s.config.Debug {
+		fmt.Printf("%s successfully merged table %v with data from %v\n", logPrefix, s.config.Dest, journal.TempLocation)
+	}
+
 	return nil
 }
 
@@ -216,6 +209,10 @@ func (s *Service) updateJn(ctx context.Context, jn *domain.JournalFs, db *sql.DB
 			fmt.Printf("%s failed to commit table %v after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
 		}
 		return err
+	}
+
+	if s.config.Debug {
+		fmt.Printf("%s successfully committed table %v\n", logPrefix, s.config.JournalTable)
 	}
 
 	return nil
@@ -295,22 +292,34 @@ func updatePart(alias string, aggregableSums string, aggregableMaxs string, over
 }
 
 func (s *Service) Merge(ctx context.Context) (err error) {
+	timeout := s.config.Timeout()
 	stats := stat.New()
 	onDone := s.counter.Begin(time.Now())
 	defer func() {
 		onDone(time.Now(), stats)
 	}()
 
-	journals, err := s.readFromJournalTable(ctx, s.dbJn)
+	readCtx, cancel := context.WithTimeout(ctx, timeout)
+	journals, err := s.readFromJournalTable(readCtx, s.dbJn)
 	if err != nil {
 		stats.Append(err)
 		return err
 	}
+	cancel() // We only needed readCtx for readFromJournalTable
 
+	// Process each journal with its own context and optional think time
 	for _, journal := range journals {
-		if err = s.processJournal(ctx, journal, s.dbJn); err != nil {
+		journalCtx, procCancel := context.WithTimeout(ctx, timeout)
+		startTime := time.Now()
+		if err = s.processJournal(journalCtx, journal, s.dbJn); err != nil {
 			stats.Append(err)
 		}
+		elapsed := time.Since(startTime)
+		thinkTime := s.config.ThinkTimeJournal() - elapsed
+		if thinkTime > 0 {
+			time.Sleep(thinkTime)
+		}
+		procCancel()
 	}
 
 	// We don't need all errors, just return the last one
