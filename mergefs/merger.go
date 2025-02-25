@@ -18,7 +18,6 @@ import (
 	"github.com/viant/sqlx/io/update"
 	"github.com/viant/sqlx/metadata/database"
 	"github.com/viant/sqlx/metadata/info/dialect"
-	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/metadata/registry"
 	"github.com/viant/x"
 	"log"
