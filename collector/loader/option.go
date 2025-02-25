@@ -4,6 +4,7 @@ type (
 	Options struct {
 		instanceId string
 		category   string
+		convertFn  func(record interface{}) (interface{}, error)
 	}
 
 	Option func(o *Options)
@@ -29,6 +30,12 @@ func WithCategory(category string) Option {
 	}
 }
 
+func WithConvertFn(fn func(record interface{}) (interface{}, error)) Option {
+	return func(o *Options) {
+		o.convertFn = fn
+	}
+}
+
 func (o *Options) Apply(opts ...Option) {
 	if len(opts) == 0 {
 		return
@@ -44,4 +51,8 @@ func (o *Options) GetInstanceId() string {
 
 func (o *Options) Category() string {
 	return o.category
+}
+
+func (o *Options) GetConvertFunc() func(record interface{}) (interface{}, error) {
+	return o.convertFn
 }

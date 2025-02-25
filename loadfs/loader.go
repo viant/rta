@@ -33,6 +33,7 @@ type Service struct {
 	msgProvider *msg.Provider
 	mux         sync.RWMutex
 	encProvider *encoder.Provider
+	convertFn   func(record interface{}) (interface{}, error)
 }
 
 // Load loads data into the file system
@@ -80,9 +81,18 @@ func (s *Service) load(data interface{}, logger *log.Logger) error {
 	}
 
 	var record interface{}
+	var err error
 
 	for i := 0; i < val.Len(); i++ {
 		record = val.Index(i).Interface()
+
+		if s.convertFn != nil {
+			record, err = s.convertFn(record)
+			if err != nil {
+				return err
+			}
+		}
+
 		err := s.loadEntry(record, logger)
 		if err != nil {
 			return err
@@ -148,7 +158,9 @@ func (s *Service) encoderProvider(record interface{}) (*encoder.Provider, error)
 }
 
 // New creates a new file system loader service
-func New(cfg *config.Config) (*Service, error) {
+func New(cfg *config.Config, options ...loader.Option) (*Service, error) {
+	opts := loader.NewOptions(options...)
+
 	err := cfg.Init()
 	if err != nil {
 		return nil, err
@@ -160,8 +172,9 @@ func New(cfg *config.Config) (*Service, error) {
 	}
 
 	srv := &Service{
-		config: cfg,
-		format: Format{},
+		config:    cfg,
+		format:    Format{},
+		convertFn: opts.GetConvertFunc(),
 	}
 
 	err = srv.init()
