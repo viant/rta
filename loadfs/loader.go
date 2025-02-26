@@ -33,7 +33,7 @@ type Service struct {
 	msgProvider *msg.Provider
 	mux         sync.RWMutex
 	encProvider *encoder.Provider
-	convertFn   func(record interface{}) (interface{}, error)
+	wrapFn      func(record interface{}, wrapper interface{}) (interface{}, error)
 }
 
 // Load loads data into the file system
@@ -81,16 +81,19 @@ func (s *Service) load(data interface{}, logger *log.Logger) error {
 	}
 
 	var record interface{}
+	var wrapper interface{}
 	var err error
 
 	for i := 0; i < val.Len(); i++ {
 		record = val.Index(i).Interface()
 
-		if s.convertFn != nil {
-			record, err = s.convertFn(record)
+		if s.wrapFn != nil {
+			// we can reuse wrapper as long everything is sequential and ephemeral (no concurrency and no references are stored )
+			wrapper, err = s.wrapFn(record, wrapper)
 			if err != nil {
 				return err
 			}
+			record = wrapper
 		}
 
 		err := s.loadEntry(record, logger)
@@ -172,9 +175,9 @@ func New(cfg *config.Config, options ...loader.Option) (*Service, error) {
 	}
 
 	srv := &Service{
-		config:    cfg,
-		format:    Format{},
-		convertFn: opts.GetConvertFunc(),
+		config: cfg,
+		format: Format{},
+		wrapFn: opts.GetWrapFunc(),
 	}
 
 	err = srv.init()

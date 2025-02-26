@@ -4,7 +4,7 @@ type (
 	Options struct {
 		instanceId string
 		category   string
-		convertFn  func(record interface{}) (interface{}, error)
+		wrapFn     func(record interface{}, wrapper interface{}) (interface{}, error)
 	}
 
 	Option func(o *Options)
@@ -30,9 +30,9 @@ func WithCategory(category string) Option {
 	}
 }
 
-func WithConvertFn(fn func(record interface{}) (interface{}, error)) Option {
+func WithWrapFn(fn func(record interface{}, wrapper interface{}) (interface{}, error)) Option {
 	return func(o *Options) {
-		o.convertFn = fn
+		o.wrapFn = fn
 	}
 }
 
@@ -53,6 +53,6 @@ func (o *Options) Category() string {
 	return o.category
 }
 
-func (o *Options) GetConvertFunc() func(record interface{}) (interface{}, error) {
-	return o.convertFn
+func (o *Options) GetWrapFunc() func(record interface{}, wrapper interface{}) (interface{}, error) {
+	return o.wrapFn
 }
