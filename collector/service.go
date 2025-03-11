@@ -355,11 +355,12 @@ func (s *Service) Flush(batch *Batch) error {
 				err2 := fmt.Errorf("flush warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
 				log.Println(err2.Error())
 				stats.Append(err2)
-			} else {
-				if s.config.Debug {
-					fmt.Printf("succesfully loaded by fs loader (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s)", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID)
-				}
 			}
+			//else {
+			//if s.config.Debug {
+			//	fmt.Printf("succesfully loaded by fs loader (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s)", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID)
+			//}
+			//}
 		}
 	}
 	return s.closeBatch(ctx, batch)
@@ -624,16 +625,16 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 			fmt.Println("failed to merge batch, scheduling for flush", err)
 			break
 		}
-		if s.config.Debug {
-			fmt.Printf("succesfully merged batches by collector [instance: %s, category: %s]: master: %v (rows sum: %d), candidate: %v (rows cnt: %d)\n", s.instanceId, s.category, masterBatch.ID, masterBatch.Accumulator.Len(), candidate.ID, candidate.Accumulator.Len())
-		}
+		//if s.config.Debug {
+		//	fmt.Printf("succesfully merged batches by collector [instance: %s, category: %s]: master: %v (rows sum: %d), candidate: %v (rows cnt: %d)\n", s.instanceId, s.category, masterBatch.ID, masterBatch.Accumulator.Len(), candidate.ID, candidate.Accumulator.Len())
+		//}
 	}
 
 	err = s.Flush(masterBatch)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
-		if s.config.Debug {
-			fmt.Printf("scheduleBatch after flush error by collector [instance: %s, category: %s]: master: %v (rows sum: %d), error: %v\n", s.instanceId, s.category, masterBatch.ID, masterBatch.Accumulator.Len(), err)
-		}
+		//if s.config.Debug {
+		//	fmt.Printf("scheduleBatch after flush error by collector [instance: %s, category: %s]: master: %v (rows sum: %d), error: %v\n", s.instanceId, s.category, masterBatch.ID, masterBatch.Accumulator.Len(), err)
+		//}
 		s.scheduleBatch(true, masterBatch)
 	}
 	if err == nil {
