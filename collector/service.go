@@ -631,6 +631,9 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 
 	err = s.Flush(masterBatch)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
+		if s.config.Debug {
+			fmt.Printf("scheduleBatch after flush error by collector [instance: %s, category: %s]: master: %v (rows sum: %d), error: %v\n", s.instanceId, s.category, masterBatch.ID, masterBatch.Accumulator.Len(), err)
+		}
 		s.scheduleBatch(true, masterBatch)
 	}
 	if err == nil {
