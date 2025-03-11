@@ -344,7 +344,7 @@ func (s *Service) Flush(batch *Batch) error {
 		data := s.mapperFn(batch.Accumulator)
 		if err := s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
-			err2 := fmt.Errorf("load error (rows cnt: %d, collector [instance: %s, category: %s], batch id: %s) due to: %w", batch.Accumulator.Len(), s.instanceId, s.category, batch.ID, err)
+			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
 			stats.Append(err2)
 			return err2
 		}
@@ -352,9 +352,13 @@ func (s *Service) Flush(batch *Batch) error {
 		if s.fsLoader != nil {
 			err := s.fsLoader.Load(ctx, data, batch.ID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
 			if err != nil {
-				err2 := fmt.Errorf("flush warning: failed to fs load (rows cnt: %d, collector [instance: %s, category: %s], batch id: %s) due to: %w", batch.Accumulator.Len(), s.instanceId, s.category, batch.ID, err)
+				err2 := fmt.Errorf("flush warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
 				log.Println(err2.Error())
 				stats.Append(err2)
+			} else {
+				if s.config.Debug {
+					fmt.Printf("succesfully loaded by fs loader (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s)", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID)
+				}
 			}
 		}
 	}
