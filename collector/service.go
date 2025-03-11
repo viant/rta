@@ -188,7 +188,7 @@ func (s *Service) getBatch() (*Batch, error) {
 		return nil, err
 	}
 	if prevBatch != nil {
-		s.scheduleBatch(true, prevBatch)
+		s.scheduleBatch(false, prevBatch)
 	}
 	s.activeBatch = batch
 	return batch, nil
@@ -697,7 +697,7 @@ func (s *Service) watchActiveBatch() {
 		}
 
 		if !batch.IsActive(s.config.Batch) && !batch.HasPendingTransaction() {
-			s.scheduleBatch(true, batch)
+			s.scheduleBatch(false, batch)
 			s.activeBatch = nil
 		}
 		s.mux.Unlock()
