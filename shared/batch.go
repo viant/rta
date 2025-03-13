@@ -3,9 +3,10 @@ package shared
 import "strings"
 
 const (
-	PendingSuffix         = "-pending"
-	DefaultMaxMessageSize = 2048
-	DefaultConcurrency    = 8
+	PendingSuffix             = "-pending"
+	DefaultMaxMessageSize     = 2048
+	DefaultConcurrency        = 8
+	DefaultFsLoadRetryDealyMs = 25
 )
 
 func BatchID(URL string) string {

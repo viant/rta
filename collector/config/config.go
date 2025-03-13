@@ -15,22 +15,24 @@ import (
 )
 
 type Config struct {
-	ID                  string
-	Loader              *config.Config
-	FsLoader            *fslconfig.Config
-	Stream              *tconfig.Stream
-	UseFastMap          bool
-	FastMapSize         int
-	MaxMessageSize      int
-	Concurrency         int
-	Batch               *Batch
-	Retry               *Retry
-	StreamDisabled      bool
-	LoadDelayMaxMs      int
-	LoadDelaySeedPart   int
-	LoadDelayEveryNExec int
-	LoadDelayOnlyOnce   bool
-	Debug               bool
+	ID                   string
+	Loader               *config.Config
+	FsLoader             *fslconfig.Config
+	FsLoaderMaxRetry     int
+	FsLoaderRetryDelayMs int
+	Stream               *tconfig.Stream
+	UseFastMap           bool
+	FastMapSize          int
+	MaxMessageSize       int
+	Concurrency          int
+	Batch                *Batch
+	Retry                *Retry
+	StreamDisabled       bool
+	LoadDelayMaxMs       int
+	LoadDelaySeedPart    int
+	LoadDelayEveryNExec  int
+	LoadDelayOnlyOnce    bool
+	Debug                bool
 }
 
 func (c *Config) Clone() *Config {
@@ -119,6 +121,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Batch.MaxElements <= 0 {
 		return errors.Errorf("Batch MaxElements was 0")
+	}
+
+	if c.FsLoaderMaxRetry < 0 {
+		return errors.Errorf("FsLoaderMaxRetry was less than 0")
+	}
+
+	if c.FsLoaderMaxRetry > 0 && c.FsLoaderRetryDelayMs <= 0 {
+		c.FsLoaderRetryDelayMs = shared.DefaultFsLoadRetryDealyMs
 	}
 
 	return nil
