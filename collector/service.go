@@ -351,9 +351,10 @@ func (s *Service) Flush(batch *Batch) error {
 
 		if s.fsLoader != nil {
 			err := s.fsLoader.Load(ctx, data, batch.ID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
+			err, retries := s.retryFsLoadIfNeeded(batch.ID, err, ctx, data)
 			if err != nil {
-				err, retries := s.retryFsLoadIfNeeded(batch.ID, err, ctx, data)
-				err2 := fmt.Errorf("flush warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s%s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, retries, err)
+				err2 := fmt.Errorf("flush warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s%s) due to: %w",
+					s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, retries, err)
 				log.Println(err2.Error())
 				stats.Append(err2)
 			}
@@ -468,8 +469,8 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 
 	if s.fsLoader != nil {
 		err := s.fsLoader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
+		err, retries := s.retryFsLoadIfNeeded(batchID, err, ctx, data)
 		if err != nil {
-			err, retries := s.retryFsLoadIfNeeded(batchID, err, ctx, data)
 			err2 := fmt.Errorf("replaybatch warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s%s) due to: %w", s.instanceId, s.category, acc.Len(), batchID, retries, err)
 			log.Println(err2.Error())
 			stats.Append(err2)
