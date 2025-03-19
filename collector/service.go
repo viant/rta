@@ -172,15 +172,15 @@ func (s *Service) getBatch() (*Batch, error) {
 	prevBatch := s.activeBatch
 	s.mux.RUnlock()
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
-		if s.ID() == "publisher" {
-			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch01", prevBatch.ID, prevBatch.Accumulator.Len())
-		}
 		return prevBatch, nil
 	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	prevBatch = s.activeBatch
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
+		if s.ID() == "publisher" {
+			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch02", prevBatch.ID, prevBatch.Accumulator.Len())
+		}
 		return prevBatch, nil
 	}
 	if s.fastMapPool != nil {
