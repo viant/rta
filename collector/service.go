@@ -172,12 +172,18 @@ func (s *Service) getBatch() (*Batch, error) {
 	prevBatch := s.activeBatch
 	s.mux.RUnlock()
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
+		if s.ID() == "publisher" || s.ID() == "location" {
+			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch01", prevBatch.ID, prevBatch.Accumulator.Len())
+		}
 		return prevBatch, nil
 	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	prevBatch = s.activeBatch
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
+		if s.ID() == "publisher" || s.ID() == "location" {
+			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch02", prevBatch.ID, prevBatch.Accumulator.Len())
+		}
 		return prevBatch, nil
 	}
 	if s.fastMapPool != nil {
@@ -191,6 +197,10 @@ func (s *Service) getBatch() (*Batch, error) {
 		s.scheduleBatch(false, prevBatch)
 	}
 	s.activeBatch = batch
+
+	if s.ID() == "publisher" || s.ID() == "location" {
+		fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch03NewBatch", batch.ID, batch.Accumulator.Len())
+	}
 	return batch, nil
 }
 
@@ -629,6 +639,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	masterBatch := batchesToFlushNow[0]
 
+	start := time.Now()
 	var inconsistentBackup []*Batch
 	for i := 1; i < len(batchesToFlushNow); i++ {
 		candidate := batchesToFlushNow[i]
@@ -641,6 +652,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 			break
 		}
 	}
+	elapsed := time.Now().Sub(start)
 
 	err = s.Flush(masterBatch)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
@@ -648,7 +660,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	if err == nil {
 		if s.config.Debug {
-			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d) %v\n", s.instanceId, s.category, masterBatch.Accumulator.Len(), masterBatch.ID)
+			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d, batches cnt: %d, mergeBatchT: %v) %v\n", s.instanceId, s.category, masterBatch.Accumulator.Len(), len(batchesToFlushNow), elapsed, masterBatch.ID)
 		}
 		for i, item := range inconsistentBackup {
 			if err := s.closeBatch(ctx, item); err != nil {
@@ -681,6 +693,9 @@ func (s *Service) scheduleBatch(withLock bool, batches ...*Batch) {
 	t.Add(time.Second)
 	for _, batch := range batches {
 		batch.ScheduleAt(&t)
+		if s.ID() == "publisher" || s.ID() == "location" {
+			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "scheduleBatch", batch.ID, batch.Accumulator.Len())
+		}
 	}
 	if withLock {
 		s.mux.Lock()
@@ -712,6 +727,9 @@ func (s *Service) watchActiveBatch() {
 		if !batch.IsActive(s.config.Batch) && !batch.HasPendingTransaction() {
 			s.scheduleBatch(false, batch)
 			s.activeBatch = nil
+			if s.ID() == "publisher" || s.ID() == "location" {
+				fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "watchActiveBatch", batch.ID, batch.Accumulator.Len())
+			}
 		}
 		s.mux.Unlock()
 		time.Sleep(sleepTime)
