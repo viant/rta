@@ -630,7 +630,13 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	if size == 0 {
 		return false, nil
 	}
+	if s.ID() == "publisher" {
+		fmt.Printf("debug batch: collectorInst: %v func: %s\n", s.ID(), "pre getBatchesToFlush")
+	}
 	batchesToFlushNow := s.getBatchesToFlush(size)
+	if s.ID() == "publisher" {
+		fmt.Printf("debug batch: collectorInst: %v func: %s post getBatchesToFlush len(batchesToFlushNow) == %v\n", s.ID(), "post getBatchesToFlush", len(batchesToFlushNow))
+	}
 	if len(batchesToFlushNow) == 0 {
 		return false, nil
 	}
