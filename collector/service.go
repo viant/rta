@@ -172,7 +172,7 @@ func (s *Service) getBatch() (*Batch, error) {
 	prevBatch := s.activeBatch
 	s.mux.RUnlock()
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
-		if s.ID() == "publisher" || s.ID() == "location" {
+		if s.ID() == "publisher" {
 			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch01", prevBatch.ID, prevBatch.Accumulator.Len())
 		}
 		return prevBatch, nil
@@ -181,9 +181,6 @@ func (s *Service) getBatch() (*Batch, error) {
 	defer s.mux.Unlock()
 	prevBatch = s.activeBatch
 	if prevBatch != nil && prevBatch.IsActive(s.config.Batch) {
-		if s.ID() == "publisher" || s.ID() == "location" {
-			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch02", prevBatch.ID, prevBatch.Accumulator.Len())
-		}
 		return prevBatch, nil
 	}
 	if s.fastMapPool != nil {
@@ -198,7 +195,7 @@ func (s *Service) getBatch() (*Batch, error) {
 	}
 	s.activeBatch = batch
 
-	if s.ID() == "publisher" || s.ID() == "location" {
+	if s.ID() == "publisher" {
 		fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "getBatch03NewBatch", batch.ID, batch.Accumulator.Len())
 	}
 	return batch, nil
@@ -693,7 +690,7 @@ func (s *Service) scheduleBatch(withLock bool, batches ...*Batch) {
 	t.Add(time.Second)
 	for _, batch := range batches {
 		batch.ScheduleAt(&t)
-		if s.ID() == "publisher" || s.ID() == "location" {
+		if s.ID() == "publisher" {
 			fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "scheduleBatch", batch.ID, batch.Accumulator.Len())
 		}
 	}
@@ -727,7 +724,7 @@ func (s *Service) watchActiveBatch() {
 		if !batch.IsActive(s.config.Batch) && !batch.HasPendingTransaction() {
 			s.scheduleBatch(false, batch)
 			s.activeBatch = nil
-			if s.ID() == "publisher" || s.ID() == "location" {
+			if s.ID() == "publisher" {
 				fmt.Printf("debug batch: collectorInst: %v func: %s, batch: %v, accCnt: %d\n", s.ID(), "watchActiveBatch", batch.ID, batch.Accumulator.Len())
 			}
 		}
