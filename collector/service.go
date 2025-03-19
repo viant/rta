@@ -348,11 +348,13 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 
 	elapsed1 := time.Duration(0)
 	elapsed2 := time.Duration(0)
+	totalStr := ""
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
 		start1 := time.Now()
-		if err := s.load(context.Background(), data, batch.ID); err != nil {
+		var err error
+		if totalStr, err = s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
 			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
 			stats.Append(err2)
@@ -373,7 +375,7 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 		}
 		elapsed2 = time.Now().Sub(start2)
 	}
-	return fmt.Sprintf(" loadT: %v, fsloadT: %v", elapsed1, elapsed2), s.closeBatch(ctx, batch)
+	return fmt.Sprintf(" loadT: %v, fsloadT: %v, %s", elapsed1, elapsed2, totalStr), s.closeBatch(ctx, batch)
 
 }
 
@@ -472,7 +474,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 
 	var loadErr error
 	if acc.Len() != 0 {
-		loadErr = s.load(ctx, data, batchID)
+		_, loadErr = s.load(ctx, data, batchID)
 	}
 	log.Printf("replaybatch - processed: %v, failed: %v url: %v\n", processed, failed, URL)
 	if loadErr != nil {
@@ -511,20 +513,23 @@ func (s *Service) Config() *config.Config {
 	return s.config
 }
 
-func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
+func (s *Service) load(ctx context.Context, data interface{}, batchID string) (string, error) {
 	s.loadMux.Lock()
 	delay := s.ensureLoadDelayIfNeeded()
 	if delay != time.Duration(0) {
 		time.Sleep(delay)
 	}
 
+	start := time.Now()
 	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
+	elapsed := time.Now().Sub(start)
+
 	s.loadCount++
 	go func() {
 		time.Sleep(2 * time.Microsecond)
 		s.loadMux.Unlock()
 	}()
-	return err
+	return fmt.Sprintf("delay: %v, rLoadT: %v", delay, elapsed), err
 }
 
 func (s *Service) ensureLoadDelayIfNeeded() time.Duration {
