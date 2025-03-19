@@ -624,6 +624,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		}
 
 	}()
+	start0 := time.Now()
 	s.mux.RLock()
 	size := len(s.flushScheduled)
 	s.mux.RUnlock()
@@ -657,13 +658,16 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	elapsed := time.Now().Sub(start)
 
+	flushStart := time.Now()
 	err = s.Flush(masterBatch)
+	flushElapsed := time.Now().Sub(flushStart)
+	elapsed0 := time.Now().Sub(start0)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
 		s.scheduleBatch(true, masterBatch)
 	}
 	if err == nil {
 		if s.config.Debug {
-			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d, batches cnt: %d, mergeBatchT: %v) %v\n", s.instanceId, s.category, masterBatch.Accumulator.Len(), len(batchesToFlushNow), elapsed, masterBatch.ID)
+			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d, batches cnt: %d, mergeBatchT: %v, flushT: %v, flushScheduledBatches %v) %v\n", s.instanceId, s.category, masterBatch.Accumulator.Len(), len(batchesToFlushNow), elapsed, flushElapsed, elapsed0, masterBatch.ID)
 		}
 		for i, item := range inconsistentBackup {
 			if err := s.closeBatch(ctx, item); err != nil {
