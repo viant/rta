@@ -285,7 +285,7 @@ func (s *Service) Close() error {
 		return nil
 	}
 	atomic.AddInt32(&s.closed, 1)
-	err := s.Flush(batch)
+	_, err := s.Flush(batch)
 	if err != nil {
 		log.Println(err)
 	}
@@ -320,9 +320,9 @@ func (s *Service) reduce(acc *Accumulator, record interface{}) {
 	s.reducerFn(accumulator, record)
 }
 
-func (s *Service) Flush(batch *Batch) error {
+func (s *Service) Flush(batch *Batch) (string, error) {
 	if !atomic.CompareAndSwapUint32(&batch.flushStarted, 0, 1) {
-		return nil
+		return "", nil
 	}
 	ctx := context.Background()
 	batch.ensureNoPending()
@@ -339,16 +339,25 @@ func (s *Service) Flush(batch *Batch) error {
 		}()
 	}
 
+	primaryElapsed := time.Duration(0)
+	secondaryElapsed := time.Duration(0)
+	primarySubLog := ""
+	flushLog := ""
+
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
 	if batch.Accumulator.Len() != 0 {
 		data := s.mapperFn(batch.Accumulator)
-		if err := s.load(context.Background(), data, batch.ID); err != nil {
+		startPrimary := time.Now()
+		var err error
+		if primarySubLog, err = s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
 			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
 			stats.Append(err2)
-			return err2
+			return "", err2
 		}
+		primaryElapsed = time.Now().Sub(startPrimary)
 
+		startSecondary := time.Now()
 		if s.fsLoader != nil {
 			err := s.fsLoader.Load(ctx, data, batch.ID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
 			err, retries := s.retryFsLoadIfNeeded(batch.ID, err, ctx, data)
@@ -359,8 +368,14 @@ func (s *Service) Flush(batch *Batch) error {
 				stats.Append(err2)
 			}
 		}
+		secondaryElapsed = time.Now().Sub(startSecondary)
 	}
-	return s.closeBatch(ctx, batch)
+
+	if s.config.Debug {
+		flushLog = fmt.Sprintf(" pLoadTime: %v, sLoadTime: %v, %s", primaryElapsed, secondaryElapsed, primarySubLog)
+	}
+
+	return flushLog, s.closeBatch(ctx, batch)
 
 }
 
@@ -459,7 +474,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 
 	var loadErr error
 	if acc.Len() != 0 {
-		loadErr = s.load(ctx, data, batchID)
+		_, loadErr = s.load(ctx, data, batchID)
 	}
 	log.Printf("replaybatch - processed: %v, failed: %v url: %v\n", processed, failed, URL)
 	if loadErr != nil {
@@ -498,20 +513,29 @@ func (s *Service) Config() *config.Config {
 	return s.config
 }
 
-func (s *Service) load(ctx context.Context, data interface{}, batchID string) error {
+func (s *Service) load(ctx context.Context, data interface{}, batchID string) (string, error) {
 	s.loadMux.Lock()
 	delay := s.ensureLoadDelayIfNeeded()
 	if delay != time.Duration(0) {
 		time.Sleep(delay)
 	}
 
+	loadLog := ""
+	start := time.Now()
 	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
+	elapsed := time.Now().Sub(start)
+
 	s.loadCount++
 	go func() {
 		time.Sleep(2 * time.Microsecond)
 		s.loadMux.Unlock()
 	}()
-	return err
+
+	if s.config.Debug {
+		loadLog = fmt.Sprintf("pLoadDelay: %v, pLoadSubTime: %v", delay, elapsed)
+	}
+
+	return loadLog, err
 }
 
 func (s *Service) ensureLoadDelayIfNeeded() time.Duration {
@@ -617,6 +641,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		}
 
 	}()
+	startFlushScheduledBatches := time.Now()
 	s.mux.RLock()
 	size := len(s.flushScheduled)
 	s.mux.RUnlock()
@@ -629,6 +654,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	masterBatch := batchesToFlushNow[0]
 
+	startMergeBatch := time.Now()
 	var inconsistentBackup []*Batch
 	for i := 1; i < len(batchesToFlushNow); i++ {
 		candidate := batchesToFlushNow[i]
@@ -641,14 +667,24 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 			break
 		}
 	}
+	elapsedMergeBatch := time.Now().Sub(startMergeBatch)
 
-	err = s.Flush(masterBatch)
+	flushMasterBatchStart := time.Now()
+	flushSubLog, err := s.Flush(masterBatch)
+	elapsedFlushBatch := time.Now().Sub(flushMasterBatchStart)
+
+	elapsedTotal := time.Now().Sub(startFlushScheduledBatches)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
 		s.scheduleBatch(true, masterBatch)
 	}
 	if err == nil {
 		if s.config.Debug {
-			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d) %v\n", s.instanceId, s.category, masterBatch.Accumulator.Len(), masterBatch.ID)
+			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d, batchCnt: %d, flushTotalT: %v, flushBatchT %v, mergeBatchT %v, %v) %v\n",
+				s.instanceId, s.category,
+				masterBatch.Accumulator.Len(), len(batchesToFlushNow),
+				elapsedTotal, elapsedFlushBatch, elapsedMergeBatch,
+				flushSubLog,
+				masterBatch.ID)
 		}
 		for i, item := range inconsistentBackup {
 			if err := s.closeBatch(ctx, item); err != nil {
