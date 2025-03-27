@@ -372,7 +372,7 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 	}
 
 	if s.config.Debug {
-		flushLog = fmt.Sprintf(" pLoadTime: %v, sLoadTime: %v, %s", primaryElapsed, secondaryElapsed, primarySubLog)
+		flushLog = fmt.Sprintf("pLoad:%v, sLoad:%v, %s", primaryElapsed, secondaryElapsed, primarySubLog)
 	}
 
 	return flushLog, s.closeBatch(ctx, batch)
@@ -521,9 +521,7 @@ func (s *Service) load(ctx context.Context, data interface{}, batchID string) (s
 	}
 
 	loadLog := ""
-	start := time.Now()
 	err := s.loader.Load(ctx, data, batchID, loader2.WithInstanceId(s.instanceId), loader2.WithCategory(s.category))
-	elapsed := time.Now().Sub(start)
 
 	s.loadCount++
 	go func() {
@@ -532,7 +530,7 @@ func (s *Service) load(ctx context.Context, data interface{}, batchID string) (s
 	}()
 
 	if s.config.Debug {
-		loadLog = fmt.Sprintf("pLoadDelay: %v, pLoadSubTime: %v", delay, elapsed)
+		loadLog = fmt.Sprintf("pDelay:%v", delay)
 	}
 
 	return loadLog, err
@@ -669,9 +667,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	elapsedMergeBatch := time.Now().Sub(startMergeBatch)
 
-	flushMasterBatchStart := time.Now()
 	flushSubLog, err := s.Flush(masterBatch)
-	elapsedFlushBatch := time.Now().Sub(flushMasterBatchStart)
 
 	elapsedTotal := time.Now().Sub(startFlushScheduledBatches)
 	if err != nil { //if flush failed, lets put back the batch to the flushScheduled
@@ -679,10 +675,10 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	if err == nil {
 		if s.config.Debug {
-			fmt.Printf("succesfully flushed batch by collector [instance: %s, category: %s]: (rows cnt: %d, batchCnt: %d, flushTotalT: %v, flushBatchT %v, mergeBatchT %v, %v) %v\n",
+			fmt.Printf("successfully flushed [%s, %s] rows:%d, batchCnt:%d, total:%v, merge:%v, %v, %v\n",
 				s.instanceId, s.category,
 				masterBatch.Accumulator.Len(), len(batchesToFlushNow),
-				elapsedTotal, elapsedFlushBatch, elapsedMergeBatch,
+				elapsedTotal, elapsedMergeBatch,
 				flushSubLog,
 				masterBatch.ID)
 		}
