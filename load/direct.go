@@ -134,7 +134,19 @@ func (s *Service) loadFnDirect(ctx context.Context, db *sql.DB, sourceTable stri
 			if batchSize < 1 {
 				batchSize = 1
 			}
-			affected, _, err := srv.Exec(ctx, any, options.db, option.BatchSize(batchSize))
+
+			var tx *sql.Tx
+			if options.db != nil {
+				tx, err = options.db.Begin()
+				if err != nil {
+					return 0, err
+				}
+			}
+
+			affected, _, err := srv.Exec(ctx, any, options.db, option.BatchSize(batchSize) /*, tx*/)
+			if err != nil && tx != nil {
+				_ = tx.Rollback()
+			}
 			return int(affected), err
 		}, nil
 	}
