@@ -190,7 +190,7 @@ func (s *Service) updateJn(ctx context.Context, jn *domain.JournalFs, db *sql.DB
 	}
 
 	if err = s.updateJournal(ctx, db, jn, tx); err != nil {
-		_ = tx.Rollback()
+		err = errors.Join(err, tx.Rollback())
 		stats.Append(err)
 		if s.config.Debug {
 			fmt.Printf("%s failed to update table %v after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)

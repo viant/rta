@@ -3,6 +3,7 @@ package load
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/domain"
@@ -130,23 +131,30 @@ func (s *Service) loadFnDirect(ctx context.Context, db *sql.DB, sourceTable stri
 		}
 		return func(ctx context.Context, any interface{}, opts ...Option) (int, error) {
 			options := newOptions(opts)
+			if options.db != nil {
+				return 0, fmt.Errorf("load - loadFnDirect: db is nil")
+			}
 			batchSize := s.config.BatchSize
 			if batchSize < 1 {
 				batchSize = 1
 			}
 
-			var tx *sql.Tx
-			if options.db != nil {
-				tx, err = options.db.Begin()
-				if err != nil {
-					return 0, err
-				}
+			tx, err := options.db.Begin()
+			if err != nil {
+				return 0, err
 			}
 
-			affected, _, err := srv.Exec(ctx, any, options.db, option.BatchSize(batchSize) /*, tx*/)
-			if err != nil && tx != nil {
-				_ = tx.Rollback()
+			affected, _, err := srv.Exec(ctx, any, options.db, option.BatchSize(batchSize), tx)
+			if err != nil {
+				err = errors.Join(err, tx.Rollback())
+				return 0, err
 			}
+
+			err = tx.Commit()
+			if err != nil {
+				return 0, err
+			}
+
 			return int(affected), err
 		}, nil
 	}
