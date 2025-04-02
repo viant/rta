@@ -7,9 +7,13 @@ import (
 )
 
 type Connection struct {
-	Driver string `yaml:"Driver"`
-	Dsn    string `yaml:"Dsn"`
-	Secret *scy.Resource
+	Driver        string `yaml:"Driver"`
+	Dsn           string `yaml:"Dsn"`
+	MaxOpenConns  int
+	MaxIdleConns  int
+	MaxIdleTimeMs int
+	MaxLifetimeMs int
+	Secret        *scy.Resource
 }
 
 func (c *Connection) OpenDB(ctx context.Context) (*sql.DB, error) {

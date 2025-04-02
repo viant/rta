@@ -142,7 +142,7 @@ func New(c *config.Config) (*MultiMerger, error) {
 
 	var err error
 
-	result.dbJn, err = c.JournalConnection.OpenDB(context.Background())
+	err = result.initJnConnection()
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +154,28 @@ func New(c *config.Config) (*MultiMerger, error) {
 
 	go result.startEndpoint()
 	return result, nil
+}
+
+func (m *MultiMerger) initJnConnection() error {
+	var err error
+
+	cfg := m.config.JournalConnection
+	m.dbJn, err = cfg.OpenDB(context.Background())
+
+	if cfg.MaxOpenConns > 0 {
+		m.dbJn.SetMaxOpenConns(cfg.MaxOpenConns)
+	}
+	if cfg.MaxIdleConns > 0 {
+		m.dbJn.SetMaxIdleConns(cfg.MaxIdleConns)
+	}
+	if cfg.MaxLifetimeMs > 0 {
+		m.dbJn.SetConnMaxLifetime(time.Duration(cfg.MaxLifetimeMs) * time.Millisecond)
+	}
+	if cfg.MaxIdleTimeMs > 0 {
+		m.dbJn.SetConnMaxIdleTime(time.Duration(cfg.MaxIdleTimeMs) * time.Millisecond)
+	}
+
+	return err
 }
 
 func (m *MultiMerger) populateMergers() error {
