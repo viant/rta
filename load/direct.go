@@ -131,7 +131,7 @@ func (s *Service) loadFnDirect(ctx context.Context, db *sql.DB, sourceTable stri
 		}
 		return func(ctx context.Context, any interface{}, opts ...Option) (int, error) {
 			options := newOptions(opts)
-			if options.db != nil {
+			if options.db == nil {
 				return 0, fmt.Errorf("load - loadFnDirect: db is nil")
 			}
 			batchSize := s.config.BatchSize
