@@ -8,6 +8,7 @@ import (
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	"github.com/viant/gmetric/provider"
+	collector "github.com/viant/rta/collector"
 	rconfig "github.com/viant/rta/config"
 	"github.com/viant/rta/domain"
 	"github.com/viant/rta/load"
@@ -15,6 +16,7 @@ import (
 	"github.com/viant/rta/mergefs/config"
 	"github.com/viant/rta/mergefs/handler"
 	"github.com/viant/rta/mergefs/registry"
+	aregistry "github.com/viant/rta/mergefs/registry"
 	"github.com/viant/sqlx/io/read"
 	"github.com/viant/sqlx/metadata"
 	"github.com/viant/sqlx/metadata/database"
@@ -133,8 +135,7 @@ func New(c *config.Config) (*MultiMerger, error) {
 		inUse:   make(map[string]bool),
 	}
 
-	r := registry.Registry()
-	result.xType = registry.LookUp(r, c.TypeName)
+	result.xType = registry.TypeRegistry.Lookup(c.TypeName)
 	if result.xType == nil {
 		return nil, fmt.Errorf("%s failed to lookup type: %v", logPrefix, c.TypeName)
 	}
@@ -214,8 +215,59 @@ func (m *MultiMerger) newMerger(name string) (*Service, error) {
 		return nil, fmt.Errorf("failed to ensure configuration for %q: %w", name, err)
 	}
 
-	if err := lConfig.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid loader configuration for %q: %w", name, err)
+	var loader *load.Service
+	var aCollector *collector.Service
+
+	if aConfig.Collector == nil {
+		if err := lConfig.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid loader configuration for %q: %w", name, err)
+		}
+
+		loader, err = ensureLoader(lConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize loader for %q: %w", name, err)
+		}
+	} else {
+
+		typeName := m.config.TypeName
+
+		newFn, ok := aregistry.LookupNewFn(typeName)
+		if !ok {
+			return nil, fmt.Errorf("unable to find newFn function for type %s", typeName)
+		}
+
+		keyFn, ok := aregistry.LookupKeyFn(typeName)
+		if !ok {
+			return nil, fmt.Errorf("unable to find keyFn function for type %s", typeName)
+		}
+
+		reduceFn, ok := aregistry.LookupReduceFn(typeName)
+		if !ok {
+			return nil, fmt.Errorf("unable to find reduceFn function for type %s", typeName)
+		}
+
+		mapperFn, ok := aregistry.LookupMapperFn(typeName)
+		if !ok {
+			return nil, fmt.Errorf("unable to find mapperFn function for type %s", typeName)
+		}
+
+		lConfig := aConfig.Collector.Loader
+
+		if err := lConfig.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid collector's loader configuration for %q: %w", name, err)
+		}
+
+		loader, err = ensureLoader(lConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize loader for %q: %w", name, err)
+		}
+
+		opts := []collector.Option{collector.WithInstanceId(name)}
+		// TODO metrics - check
+		aCollector, err = collector.New(aConfig.Collector, newFn, keyFn, reduceFn, mapperFn, loader, m.metrics, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize collector for %q: %w", name, err)
+		}
 	}
 
 	err = checkTableExistence(m.dbJn, aConfig.JournalTable)
@@ -223,18 +275,14 @@ func (m *MultiMerger) newMerger(name string) (*Service, error) {
 		return nil, err
 	}
 
-	loader, err := ensureLoader(lConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize loader for %q: %w", name, err)
-	}
-
 	srv := &Service{
-		config:  aConfig,
-		metrics: m.metrics,
-		fs:      m.fs,
-		xType:   m.xType,
-		loader:  loader,
-		dbJn:    m.dbJn,
+		config:       aConfig,
+		metrics:      m.metrics,
+		fs:           m.fs,
+		xType:        m.xType,
+		loader:       loader,
+		dbJn:         m.dbJn,
+		collectorSrv: aCollector,
 	}
 	ensureCounters(srv, name)
 
@@ -301,6 +349,10 @@ func ensureTypeDef(rType reflect.Type) string {
 func ensureConfig(c *config.Config, name string, typeDef string) (*config.Config, *lconfig.Config, error) {
 	aConfig := c.PrepareMergeFsConfig()
 	aConfig.ExpandConfig(name, typeDef)
+
+	if c.Collector != nil {
+		return aConfig, nil, nil
+	}
 
 	lConfig, err := ensureLoaderConfig(aConfig)
 	if err != nil {

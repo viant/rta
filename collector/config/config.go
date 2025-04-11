@@ -33,6 +33,7 @@ type Config struct {
 	LoadDelayEveryNExec  int
 	LoadDelayOnlyOnce    bool
 	Debug                bool
+	Mode                 string
 }
 
 func (c *Config) Clone() *Config {
@@ -46,8 +47,15 @@ func (c *Config) Clone() *Config {
 		s := *stream
 		result.Stream = &s
 	}
-	result.Batch = c.Batch.Clone()
-	result.Retry = c.Retry.Clone()
+
+	if c.Batch != nil {
+		result.Batch = c.Batch.Clone()
+	}
+
+	if c.Retry != nil {
+		result.Retry = c.Retry.Clone()
+	}
+
 	return &result
 }
 
@@ -92,7 +100,7 @@ func (c *Config) Validate() error {
 	if c.Loader.Dest == "" {
 		return errors.Errorf("Dest was empty")
 	}
-	if c.Loader.JournalTable == "" {
+	if c.Loader.JournalTable == "" && c.Mode != ManualMode {
 		return errors.Errorf("JournalTable was empty")
 	}
 	if c.Loader.Connection == nil {

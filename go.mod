@@ -11,8 +11,8 @@ require (
 	github.com/mhmtszr/concurrent-swiss-map v1.0.8
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
-	github.com/viant/aerospike v0.2.7
-	github.com/viant/afs v1.16.1-0.20220601210902-dc23d64dda15
+	github.com/viant/aerospike v0.3.1-0.20250311183939-c9d3c4d2c869
+	github.com/viant/afs v1.25.1
 	github.com/viant/assertly v0.9.1-0.20220620174148-bab013f93a60
 	github.com/viant/bigquery v0.2.1
 	github.com/viant/dsunit v0.10.10

@@ -194,6 +194,10 @@ func (s *Service) getBatch() (*Batch, error) {
 	return batch, nil
 }
 
+func (s *Service) GetBatch() (*Batch, error) {
+	return s.getBatch()
+}
+
 func (s *Service) ID() string {
 	return s.config.ID
 }
@@ -553,7 +557,7 @@ func (s *Service) ensureLoadDelayIfNeeded() time.Duration {
 	return time.Duration(loadDelay) * time.Millisecond
 }
 
-func New(config *config.Config,
+func New(cfg *config.Config,
 	newRecord func() interface{},
 	key func(record interface{}) interface{},
 	reducer func(key, source interface{}),
@@ -564,7 +568,7 @@ func New(config *config.Config,
 	fsLoader := opts.FsLoader()
 
 	srv := &Service{
-		config:     config,
+		config:     cfg,
 		fs:         afs.New(),
 		keyFn:      key,
 		newRecord:  newRecord,
@@ -572,7 +576,7 @@ func New(config *config.Config,
 		mapperFn:   mapper,
 		loader:     loader,
 		fsLoader:   fsLoader,
-		Provider:   msg.NewProvider(config.MaxMessageSize, config.Concurrency, tjson.New),
+		Provider:   msg.NewProvider(cfg.MaxMessageSize, cfg.Concurrency, tjson.New),
 		metrics:    metrics,
 		options:    options,
 		instanceId: opts.GetInstanceId(),
@@ -580,21 +584,28 @@ func New(config *config.Config,
 		category:   opts.Category(),
 	}
 
-	if config.UseFastMap {
-		srv.fastMapPool = NewFMapPool(max(100, config.FastMapSize), 2)
+	if cfg.UseFastMap {
+		srv.fastMapPool = NewFMapPool(max(100, cfg.FastMapSize), 2)
 	}
-	if config.LoadDelayMaxMs > 0 {
-		seed := time.Now().UnixNano() + int64(config.LoadDelaySeedPart)
+	if cfg.LoadDelayMaxMs > 0 {
+		seed := time.Now().UnixNano() + int64(cfg.LoadDelaySeedPart)
 		srv.randGenerator = rand.New(rand.NewSource(seed))
 	}
 
 	if metrics != nil {
-		srv.flushCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), config.ID+"Flush", "flush metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
-		srv.retryCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), config.ID+"Retry", "retry metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
+		srv.flushCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), cfg.ID+"Flush", "flush metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
+		srv.retryCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), cfg.ID+"Retry", "retry metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
 	}
 
 	err := srv.RetryFailed(context.Background(), true)
-	if err == nil {
+	if err != nil {
+		return nil, err
+	}
+
+	switch cfg.Mode {
+	case config.ManualMode:
+		// do nothing
+	default:
 		go srv.watchScheduledBatches()
 		go srv.watchActiveBatch()
 	}
@@ -626,6 +637,22 @@ func (s *Service) addStreamSubfolder() *config.Config {
 
 func (s *Service) IsUp() bool {
 	return atomic.LoadInt32(&s.closed) == 0
+}
+
+func (s *Service) FlushOnDemand(batch *Batch, cnt int, startFlushScheduledBatches *time.Time) error {
+	elapsedMergeBatch := time.Now().Sub(*startFlushScheduledBatches)
+	flushSubLog, err := s.Flush(batch)
+	elapsedTotal := time.Now().Sub(*startFlushScheduledBatches)
+	if err == nil && s.config.Debug {
+		fmt.Printf("successfully flushed %s rows:%d, batchCnt:%d, total:%v, merge:%v, %v, %v\n",
+			s.instanceId,
+			batch.Accumulator.Len(), cnt,
+			elapsedTotal, elapsedMergeBatch,
+			flushSubLog,
+			batch.ID)
+	}
+
+	return err
 }
 
 func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err error) {
