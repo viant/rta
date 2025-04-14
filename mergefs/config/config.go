@@ -20,8 +20,8 @@ const (
 	defaultThinkTimeSec         = 1
 	defaultMergersRefreshMs     = 1000
 	LogPrefix                   = "rta fsmerger -"
-	minCollectorBatchElements   = 10000000000
-	minCollectorBatchDurationMs = 10000000000
+	minCollectorBatchElements   = 2000000000
+	minCollectorBatchDurationMs = 2000000000
 )
 
 type (
