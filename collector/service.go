@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/afs"
@@ -639,7 +640,7 @@ func (s *Service) IsUp() bool {
 	return atomic.LoadInt32(&s.closed) == 0
 }
 
-func (s *Service) FlushOnDemand(batch *Batch, cnt int, startFlushScheduledBatches *time.Time) error {
+func (s *Service) FlushOnDemand(ctx context.Context, batch *Batch, cnt int, startFlushScheduledBatches *time.Time) error {
 	elapsedMergeBatch := time.Now().Sub(*startFlushScheduledBatches)
 	flushSubLog, err := s.Flush(batch)
 	elapsedTotal := time.Now().Sub(*startFlushScheduledBatches)
@@ -652,7 +653,8 @@ func (s *Service) FlushOnDemand(batch *Batch, cnt int, startFlushScheduledBatche
 			batch.ID)
 	}
 
-	return err
+	err2 := s.closeBatch(ctx, batch)
+	return errors.Join(err, err2)
 }
 
 func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err error) {

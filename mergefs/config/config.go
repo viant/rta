@@ -46,6 +46,8 @@ type (
 		MergersRefreshMs   int
 		Collector          *cconfig.Config
 		MaxJournalsInChunk int
+		ScannerBufferMB    int //use in case you see bufio.Scanner: token too long
+		GCPercent          int
 	}
 
 	DestPlaceholders struct {
@@ -82,6 +84,10 @@ func (c *Config) init() error {
 
 	if c.ThinkTimeSec == 0 {
 		c.ThinkTimeSec = defaultThinkTimeSec
+	}
+
+	if c.GCPercent < 1 || c.GCPercent > 100 {
+		c.GCPercent = 100
 	}
 	return nil
 }
@@ -249,6 +255,15 @@ func (c *Config) validateRequired(prefix string) error {
 			return fmt.Errorf("%s %s was empty", prefix, field)
 		}
 	}
+
+	if c.GCPercent < 1 || c.GCPercent > 100 {
+		return fmt.Errorf("%s GCPercent was lower than 1 or higher than 100", prefix)
+	}
+
+	if c.ScannerBufferMB < 0 {
+		return fmt.Errorf("%s ScannerBufferMB was lower than 0", prefix)
+	}
+
 	return nil
 }
 

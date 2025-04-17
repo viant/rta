@@ -1,0 +1,46 @@
+Endpoint:
+  Port: 8061
+
+Debug: true
+TypeName: Ineligibility
+TimeoutSec:   1000 #500 only for testing
+ThinkTimeSec: 1
+
+Journal:
+  Connection:
+    Driver: mysql
+    Dsn: 'root:dev@tcp(127.0.0.1:3307)/forecaster?parseTime=true'
+  Table: ${Table}_RTA_JN
+
+Loader:
+  Mode: direct
+  Dest: ${Table} #TODO how to make Table lowercase?
+  CreateDDL: |
+    CREATE TABLE IF NOT EXISTS ${Dest} (
+    id BIGINT NOT NULL,
+    audienceID varchar(32),
+    featureTypeId int(11),
+    value int(11),
+    PRIMARY KEY (id),
+    UNIQUE KEY AUDIENCE_AUDIENCE_INELIGIBLE_UQ (id, audienceID, featureTypeId)
+    );
+  OnDuplicateKeySql: "ON DUPLICATE KEY UPDATE value = value + VALUES(value);"
+  UseInsertAPI: true
+  Connection:
+#    Driver: aerospike
+#    Dsn: 'aerospike://127.0.0.1:3000/ns_memory'
+    Driver: mysql
+    Dsn: 'root:dev@tcp(127.0.0.1:3307)/forecaster?parseTime=true'
+  BatchSize: 4
+
+#Merge:
+#  UniqueKeys:
+#    - id
+#    - audienceID
+#    - featureTypeId
+#  AggregableSum:
+#    - value
+
+Templates:
+  - AUDIENCE_AUDIENCE_INELIGIBLE
+

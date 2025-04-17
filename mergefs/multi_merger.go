@@ -17,6 +17,7 @@ import (
 	"github.com/viant/rta/mergefs/handler"
 	"github.com/viant/rta/mergefs/registry"
 	aregistry "github.com/viant/rta/mergefs/registry"
+	"github.com/viant/rta/shared"
 	"github.com/viant/sqlx/io/read"
 	"github.com/viant/sqlx/metadata"
 	"github.com/viant/sqlx/metadata/database"
@@ -72,6 +73,8 @@ func (m *MultiMerger) MergeInBackground() {
 	wg := sync.WaitGroup{}
 
 	for {
+		shared.DbStats(m.dbJn, logPrefix+" dbJn stats: ")
+
 		err := m.populateMergers()
 		if err != nil {
 			log.Printf("%s failed to populate mergers: %v", logPrefix, err)
@@ -111,11 +114,11 @@ func (m *MultiMerger) Merge(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err2 := merger.Merge(ctx)
-			if err2 != nil {
-				log.Printf("%s failed to merge table %s: %v", logPrefix, merger.config.Dest, err)
+			errorSlc := merger.Merge(ctx)
+			if len(errorSlc) > 0 {
 				mux.Lock()
 				defer mux.Unlock()
+				err2 := errors.Join(errorSlc...)
 				err = errors.Join(err, err2)
 			}
 		}()
@@ -186,7 +189,12 @@ func (m *MultiMerger) populateMergers() error {
 	}
 
 	if len(result) == 0 {
-		result = append(result, "") // case when there are no placeholders, and only 1 default merger is created
+		// case when there are no placeholders, and only 1 default merger is created
+		if m.config.Collector != nil {
+			result = append(result, m.config.Collector.Loader.Dest)
+		} else {
+			result = append(result, m.config.Dest)
+		}
 	}
 
 	m.mux.Lock()

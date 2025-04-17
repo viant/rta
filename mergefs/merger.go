@@ -53,8 +53,8 @@ func (s *Service) MergeInBackground(wg *sync.WaitGroup) {
 
 	for {
 		startTime := time.Now()
-		err := s.Merge(context.Background())
-		if err != nil {
+		errorSlc := s.Merge(context.Background())
+		for _, err := range errorSlc {
 			log.Printf("%s failed to merge table %s due to: %v", logPrefix, s.config.Dest, err)
 		}
 		elapsed := time.Since(startTime)
@@ -94,14 +94,12 @@ func (s *Service) readData(ctx context.Context, journal *domain.JournalFs, stats
 	reader, err := s.fs.OpenURL(ctx, journal.TempLocation)
 	if err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to merge table %v (open file error) with data from %v due to: %v\n", logPrefix, s.config.Dest, journal.TempLocation, err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("open file error with data from %v due to: %w\n", journal.TempLocation, err)
 	}
 	defer func() { err = errors.Join(err, reader.Close()) }()
 
 	scanner := bufio.NewScanner(reader)
+	adjustScannerBuffer(scanner, s.config.ScannerBufferMB)
 	result = []interface{}{}
 
 	for scanner.Scan() {
@@ -110,10 +108,7 @@ func (s *Service) readData(ctx context.Context, journal *domain.JournalFs, stats
 		case <-ctx.Done():
 			ctxErr := ctx.Err()
 			stats.Append(ctxErr)
-			if s.config.Debug {
-				fmt.Printf("%s failed to merge table %v (context canceled/timeout) while scanning %v: %v\n", logPrefix, s.config.Dest, journal.TempLocation, ctxErr)
-			}
-			return nil, ctxErr
+			return nil, fmt.Errorf("context canceled/timeout error while scanning %v: %w\n", journal.TempLocation, ctxErr)
 		default:
 			// continue with scanning
 		}
@@ -126,20 +121,14 @@ func (s *Service) readData(ctx context.Context, journal *domain.JournalFs, stats
 		rowPtr := reflect.New(s.xType.Type).Interface()
 		if err := gojay.Unmarshal(line, rowPtr); err != nil {
 			stats.Append(err)
-			if s.config.Debug {
-				fmt.Printf("%s failed to merge table %v (unmarshal error) with data from %v due to: %v\n", logPrefix, s.config.Dest, journal.TempLocation, err)
-			}
-			return nil, err
+			return nil, fmt.Errorf("unmarshal error with data from %v due to: %w\n", journal.TempLocation, err)
 		}
 		result = append(result, rowPtr)
 	}
 
 	if err = scanner.Err(); err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to merge table %v (scanner error) with data from %v due: %v\n", logPrefix, s.config.Dest, journal.TempLocation, err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("scanner error with data from %v due: %w\n", journal.TempLocation, err)
 	}
 
 	return result, nil
@@ -148,10 +137,7 @@ func (s *Service) readData(ctx context.Context, journal *domain.JournalFs, stats
 func (s *Service) load(ctx context.Context, journal *domain.JournalFs, result []interface{}, stats *stat.Values) error {
 	if err := s.loader.Load(ctx, result, ""); err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to merge table %v (loader error) with data from %v due to: %v\n", logPrefix, s.config.Dest, journal.TempLocation, err)
-		}
-		return err
+		return fmt.Errorf("loader error with data from %v due to: %w\n", journal.TempLocation, err)
 	}
 
 	if s.config.Debug {
@@ -164,10 +150,7 @@ func (s *Service) load(ctx context.Context, journal *domain.JournalFs, result []
 func (s *Service) deleteFile(ctx context.Context, url string, stats *stat.Values) error {
 	if err := s.fs.Delete(ctx, url); err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to delete file %v due to: %v\n", logPrefix, url, err)
-		}
-		return err
+		return fmt.Errorf("%s failed to delete file %v due to: %w\n", logPrefix, url, err)
 	}
 
 	if s.config.Debug {
@@ -181,19 +164,13 @@ func (s *Service) updateJn(ctx context.Context, jn *domain.JournalFs, db *sql.DB
 	tx, err := db.Begin()
 	if err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to update table %v (tx error) after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
-		}
-		return err
+		return fmt.Errorf("%s failed to update table %v (tx error) after successfully merging data from %v due to: %w\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
 	}
 
 	if err = s.updateJournal(ctx, db, jn, tx); err != nil {
 		err = errors.Join(err, tx.Rollback())
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to update table %v after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
-		}
-		return err
+		return fmt.Errorf("%s failed to update table %v after successfully merging data from %v due to: %w\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
 	}
 
 	if s.config.Debug {
@@ -202,10 +179,7 @@ func (s *Service) updateJn(ctx context.Context, jn *domain.JournalFs, db *sql.DB
 
 	if err = tx.Commit(); err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to commit table %v after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
-		}
-		return err
+		return fmt.Errorf("%s failed to commit table %v after successfully merging data from %v due to: %w\n", logPrefix, s.config.JournalTable, jn.TempLocation, err)
 	}
 
 	if s.config.Debug {
@@ -219,19 +193,13 @@ func (s *Service) updateJnSlc(ctx context.Context, jn []*domain.JournalFs, db *s
 	tx, err := db.Begin()
 	if err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to update table %v (tx error) after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, getLocations(jn), err)
-		}
-		return err
+		return fmt.Errorf("%s failed to update table %v (tx error) after successfully merging data from %v due to: %w\n", logPrefix, s.config.JournalTable, getLocations(jn), err)
 	}
 
 	if err = s.updateJournals(ctx, db, jn, tx); err != nil {
 		err = errors.Join(err, tx.Rollback())
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to update table %v after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, getLocations(jn), err)
-		}
-		return err
+		return fmt.Errorf("%s failed to update table %v after successfully merging data from %v due to: %w\n", logPrefix, s.config.JournalTable, getLocations(jn), err)
 	}
 
 	if s.config.Debug {
@@ -240,10 +208,7 @@ func (s *Service) updateJnSlc(ctx context.Context, jn []*domain.JournalFs, db *s
 
 	if err = tx.Commit(); err != nil {
 		stats.Append(err)
-		if s.config.Debug {
-			fmt.Printf("%s failed to commit table %v after successfully merging data from %v due to: %v\n", logPrefix, s.config.JournalTable, getLocations(jn), err)
-		}
-		return err
+		return fmt.Errorf("%s failed to commit table %v after successfully merging data from %v due to: %w\n", logPrefix, s.config.JournalTable, getLocations(jn), err)
 	}
 
 	if s.config.Debug {
@@ -351,10 +316,7 @@ func updatePart(alias string, aggregableSums string, aggregableMaxs string, over
 	return updateDDL + updateClause
 }
 
-func (s *Service) Merge(ctx context.Context) error {
-	if s.config.Debug {
-		shared.DbStats(s.dbJn, logPrefix)
-	}
+func (s *Service) Merge(ctx context.Context) []error {
 	timeout := s.config.Timeout()
 	stats := stat.New()
 	onDone := s.counter.Begin(time.Now())
@@ -362,12 +324,14 @@ func (s *Service) Merge(ctx context.Context) error {
 		onDone(time.Now(), stats)
 	}()
 
+	errorSlc := make([]error, 0)
+
 	readCtx, cancel := context.WithTimeout(ctx, timeout)
 	journals, err := s.readFromJournalTable(readCtx, s.dbJn)
 	if err != nil {
 		cancel()
 		stats.Append(err)
-		return err
+		return append(errorSlc, err)
 	}
 	cancel() // readCtx only needed for readFromJournalTable
 
@@ -379,19 +343,17 @@ func (s *Service) Merge(ctx context.Context) error {
 	}
 
 	if s.config.Collector != nil {
-		err = s.mergeJournalsWithCollector(ctx, journals, timeout, stats)
+		errorSlc = s.mergeJournalsWithCollector(ctx, journals, timeout, stats)
 	} else {
-		err = s.mergeJournals(ctx, journals, timeout, stats)
+		errorSlc = s.mergeJournals(ctx, journals, timeout, stats)
 	}
 
-	return err
+	return errorSlc
 }
 
-func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) error {
+func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) []error {
 	var err error
-	var first10Errors error
-	maxErrLogCnt := 10
-	errCnt := 0
+	errorSlc := make([]error, 0)
 
 	// Process each journal with its own context and optional think time
 	for _, journal := range journals {
@@ -400,10 +362,7 @@ func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalF
 		// don't collect all errors, return first maxErrLogCnt
 		if err = s.processJournal(journalCtx, journal, s.dbJn); err != nil {
 			stats.Append(err)
-			if errCnt < maxErrLogCnt {
-				first10Errors = errors.Join(first10Errors, err)
-			}
-			errCnt++
+			errorSlc = append(errorSlc, err)
 		}
 		elapsed := time.Since(startTime)
 		thinkTime := s.config.ThinkTimeJournal() - elapsed
@@ -413,11 +372,10 @@ func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalF
 		procCancel()
 	}
 
-	// We don't need all errors, just return first maxErrLogCnt
-	return err
+	return errorSlc
 }
 
-func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) error {
+func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) []error {
 	jnCnt := len(journals)
 	if jnCnt == 0 {
 		return nil
@@ -433,9 +391,7 @@ func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*do
 		partCnt++
 	}
 
-	var first10Errors error
-	maxErrLogCnt := 10
-	errCnt := 0
+	errorSlc := make([]error, 0)
 
 	// don't use concurrency, process serially in chunks - prevent mixing data in one batch collector from different chunks
 	for n := 0; n < partCnt; n++ {
@@ -449,10 +405,7 @@ func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*do
 		startTime := time.Now()
 		if err := s.processJournalsWithCollector(journalCtx, journals[begin:end], s.dbJn); err != nil {
 			stats.Append(err)
-			if errCnt < maxErrLogCnt {
-				first10Errors = errors.Join(first10Errors, err)
-			}
-			errCnt++
+			errorSlc = append(errorSlc, err)
 		}
 		elapsed := time.Since(startTime)
 		thinkTime := s.config.ThinkTimeJournal() - elapsed
@@ -462,8 +415,7 @@ func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*do
 		cancel()
 	}
 
-	// We don't need all errors, just return first ten
-	return first10Errors
+	return errorSlc
 }
 
 func appendClause(existing, clause string) string {
@@ -506,7 +458,8 @@ func (s *Service) processJournalsWithCollector(ctx context.Context, journals []*
 		data = resultData
 	}
 
-	err = s.loadWithCollector(data, &start)
+	// TODO load just with collector loader in case there's only 1 batch as a option
+	err = s.loadWithCollector(ctx, data, &start)
 	if err != nil {
 		return err
 	}
@@ -536,7 +489,7 @@ func (s *Service) deleteFiles(ctx context.Context, journals []*domain.JournalFs,
 	return err
 }
 
-func (s *Service) loadWithCollector(results [][]interface{}, start *time.Time) error {
+func (s *Service) loadWithCollector(ctx context.Context, results [][]interface{}, start *time.Time) error {
 	for i, r := range results {
 		if r == nil {
 			return fmt.Errorf("loadWithCollector - result is nil for at index %d", i)
@@ -555,7 +508,7 @@ func (s *Service) loadWithCollector(results [][]interface{}, start *time.Time) e
 		return fmt.Errorf("loadWithCollector - unable to get batch due to: %w", err)
 	}
 
-	err = s.collectorSrv.FlushOnDemand(b, len(results), start)
+	err = s.collectorSrv.FlushOnDemand(ctx, b, len(results), start)
 	if err != nil {
 		return fmt.Errorf("loadWithCollector - unable to flush batch due to: %w", err)
 	}
@@ -589,4 +542,10 @@ func (s *Service) fetchJournalsData(ctx context.Context, journals []*domain.Jour
 	err := errors.Join(errorSlc...)
 
 	return results, corrupted, corruptedCnt, err // return results even in case of error
+}
+
+func adjustScannerBuffer(scanner *bufio.Scanner, sizeMB int) {
+	if sizeMB > 0 {
+		scanner.Buffer(make([]byte, 0, 64*1024), sizeMB*1024*1024)
+	}
 }

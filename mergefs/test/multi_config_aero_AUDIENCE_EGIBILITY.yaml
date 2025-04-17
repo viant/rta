@@ -1,0 +1,41 @@
+Endpoint:
+  Port: 8061
+
+Debug: true
+TypeName: Selectibility
+TimeoutSec:   5
+ThinkTimeSec: 3 #1 #5 #30 sec on prod
+ThinkTimeJournalMs: 100
+
+JournalTable: ${Dest}_RTA_JN
+JournalConnection:
+  Driver: mysql
+  Dsn: 'root:dev@tcp(127.0.0.1:3307)/forecaster?parseTime=true'
+
+Dest: ${Dest_lowercase}/Values
+Connection:
+  Driver: aerospike
+  Dsn: 'aerospike://127.0.0.1:3000/ns_memory'
+
+Mode: direct
+UseInsertAPI: true
+BatchSize: 30000
+CreateDDL: "REGISTER GLOBAL SET WITH TTL 259200 ${Dest} AS ${Struct}"
+
+MainLoopDelayMs: 10
+MergersRefreshMs: 15000
+
+Merge:
+  AggregableSum:
+    - value
+
+DestPlaceholders:
+  Placeholders:
+    - AUDIENCE_SELECTABLE
+    - AUDIENCE_OFFER_PRICE
+    - AUDIENCE_BID_FLOOR
+    - AUDIENCE_INDEX_QUALIFIED
+#    - AUDIENCE_AUDIENCE_SELECTABLE
+#    - AUDIENCE_AUDIENCE_OFFER_PRICE
+#    - AUDIENCE_AUDIENCE_BID_FLOOR
+#    - AUDIENCE_AUDIENCE_INDEX_QUALIFIED
