@@ -1,6 +1,6 @@
 module github.com/viant/rta
 
-go 1.21.6
+go 1.24.2
 
 require (
 	github.com/dolthub/swiss v0.2.1
