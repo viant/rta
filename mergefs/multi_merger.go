@@ -359,6 +359,7 @@ func ensureConfig(c *config.Config, name string, typeDef string) (*config.Config
 	aConfig.ExpandConfig(name, typeDef)
 
 	if c.Collector != nil {
+		aConfig.Collector.ID = name
 		return aConfig, nil, nil
 	}
 

@@ -594,8 +594,12 @@ func New(cfg *config.Config,
 	}
 
 	if metrics != nil {
-		srv.flushCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), cfg.ID+"Flush", "flush metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
-		srv.retryCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), cfg.ID+"Retry", "retry metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
+		suffix := ""
+		if cfg.ID != "" {
+			suffix = "_" + strings.ToLower(cfg.ID)
+		}
+		srv.flushCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "flush"+suffix, "flush metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
+		srv.retryCounter = metrics.MultiOperationCounter(reflect.TypeOf(srv).PkgPath(), "retry"+suffix, "retry metric", time.Microsecond, time.Minute, 2, provider.NewBasic())
 	}
 
 	err := srv.RetryFailed(context.Background(), true)
