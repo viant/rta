@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/francoispqt/gojay"
@@ -120,8 +121,22 @@ func (s *Service) readData(ctx context.Context, journal *domain.JournalFs, stats
 
 		rowPtr := reflect.New(s.xType.Type).Interface()
 		if err := gojay.Unmarshal(line, rowPtr); err != nil {
-			stats.Append(err)
-			return nil, fmt.Errorf("unmarshal error with data from %v due to: %w\n", journal.TempLocation, err)
+			// workaround for the case with valid json and interface type for Value key:
+			// {"ID":1, "Value":"abc\\","Count":1}
+			err2 := json.Unmarshal(line, rowPtr)
+			if err2 != nil {
+				err = errors.Join(err, err2)
+				stats.Append(err)
+				var logLine string
+				maxLen := 500
+				if len(line) > maxLen {
+					logLine = string(line[:maxLen]) + " (warning: log truncated!)"
+				} else {
+					logLine = string(line)
+				}
+
+				return nil, fmt.Errorf("unmarshal error with data [%s] from %v due to: %w\n", logLine, journal.TempLocation, err)
+			}
 		}
 		result = append(result, rowPtr)
 	}
