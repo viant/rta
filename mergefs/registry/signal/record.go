@@ -1,10 +1,10 @@
 package signal
 
 type Record struct {
-	ID     int         `aerospike:"id,pk" sqlx:"id"`
-	Value  interface{} `aerospike:"value,mapKey" sqlx:"value"`
-	Bucket int         `aerospike:"bucket,arrayIndex,arraySize=144" sqlx:"bucket"`
-	Count  int64       `aerospike:"count,component" sqlx:"count"`
+	ID     int         `aerospike:"id,pk" sqlx:"id" json:"ID"`
+	Value  interface{} `aerospike:"value,mapKey" sqlx:"value" json:"Value"`
+	Bucket int         `aerospike:"bucket,arrayIndex,arraySize=144" sqlx:"bucket" json:"Bucket"`
+	Count  int64       `aerospike:"count,component" sqlx:"count" json:"Count"`
 }
 
 func NewRecord() interface{} {

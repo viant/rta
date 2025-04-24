@@ -23,8 +23,10 @@ func Key(record interface{}) interface{} {
 		return stringKey(src.ID, src.Bucket, strconv.Itoa(int(actual)))
 	case int64:
 		return stringKey(src.ID, src.Bucket, strconv.Itoa(int(actual)))
+	case float64: // encode/json uses float64 for numbers
+		return stringKey(src.ID, src.Bucket, strconv.Itoa(int(actual)))
 	default:
-		panic(fmt.Sprintf("unsupported type %T", src.Value))
+		panic(fmt.Sprintf("unsupported type %T (value: %v)", src.Value, src.Value))
 	}
 }
 
