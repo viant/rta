@@ -25,6 +25,7 @@ import (
 	"github.com/viant/xreflect"
 	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -69,10 +70,17 @@ func (m *MultiMerger) startEndpoint() {
 }
 
 // MergeInBackground run in background MergeInBackground for all mergers
-func (m *MultiMerger) MergeInBackground() {
+func (m *MultiMerger) MergeInBackground(ctxGlobal context.Context) {
 	wg := sync.WaitGroup{}
+	iterate := true
 
-	for {
+	for iterate {
+		if ctxGlobal.Err() != nil {
+			fmt.Printf("graceful shutdown - successfully interrupted loop in multimerger's MergeInBackground due to: %v\n", ctxGlobal.Err())
+			iterate = false
+			continue
+		}
+
 		shared.DbStats(m.dbJn, logPrefix+" dbJn stats: ")
 
 		err := m.populateMergers()
@@ -89,20 +97,28 @@ func (m *MultiMerger) MergeInBackground() {
 			m.inUse[merger.config.Dest] = true
 			wg.Add(1)
 			fmt.Printf("%s successfully started a new merger in background: %s\n", logPrefix, merger.config.Dest)
-			go merger.MergeInBackground(&wg)
+			go merger.MergeInBackground(ctxGlobal, &wg)
 
 			time.Sleep(time.Millisecond * time.Duration(m.config.MainLoopDelayMs))
 		}
 		m.mux.Unlock()
+		thinkTimeDur := time.Millisecond * time.Duration(m.config.MergersRefreshMs)
 
-		time.Sleep(time.Millisecond * time.Duration(m.config.MergersRefreshMs))
+		select {
+		case <-ctxGlobal.Done():
+			fmt.Printf("graceful shutdown - successfully interrupted loop in multimerger's MergeInBackground during sleep due to: %v\n", ctxGlobal.Err())
+			iterate = false
+			continue
+		case <-time.After(thinkTimeDur):
+		}
 	}
 
 	wg.Wait()
+	fmt.Printf("graceful shutdown - successfully finished multimerger's MergeInBackground function at %v due to: %v\n", time.Now().UTC(), ctxGlobal.Err())
 }
 
 // Merge run merge function for all mergers
-func (m *MultiMerger) Merge(ctx context.Context) error {
+func (m *MultiMerger) Merge(ctx context.Context, ctxGlobal context.Context) error {
 	m.mux.Lock()
 	defer m.mux.Unlock()
 
@@ -114,7 +130,7 @@ func (m *MultiMerger) Merge(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errorSlc := merger.Merge(ctx)
+			errorSlc := merger.Merge(ctx, ctxGlobal)
 			if len(errorSlc) > 0 {
 				mux.Lock()
 				defer mux.Unlock()
@@ -271,7 +287,7 @@ func (m *MultiMerger) newMerger(name string) (*Service, error) {
 		}
 
 		opts := []collector.Option{collector.WithInstanceId(name)}
-		// TODO metrics - check
+
 		aCollector, err = collector.New(aConfig.Collector, newFn, keyFn, reduceFn, mapperFn, loader, m.metrics, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize collector for %q: %w", name, err)
@@ -399,4 +415,17 @@ func checkTableExistence(db *sql.DB, tableName string) (err error) {
 	})
 
 	return err
+}
+
+func (m *MultiMerger) shutDownOnInterrupt(sigCh chan os.Signal, cancelGlobal context.CancelFunc) {
+	s := <-sigCh
+	fmt.Printf("graceful shutdown - successfully initiated at %v, termination signal received (%q)\n", time.Now().UTC(), s.String())
+	cancelGlobal()
+
+	go func() {
+		fmt.Printf("forcing exit - countdown from %d-seconds started at %v\n", m.config.ForceQuitTimeSec, time.Now().UTC())
+		time.Sleep(time.Duration(m.config.ForceQuitTimeSec) * time.Second)
+		fmt.Printf("graceful shutdown failed - %d-second grace period elapsed – forcing exit at %v\n", m.config.ForceQuitTimeSec, time.Now().UTC())
+		os.Exit(1)
+	}()
 }

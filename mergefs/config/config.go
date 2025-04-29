@@ -48,6 +48,7 @@ type (
 		MaxJournalsInChunk int
 		ScannerBufferMB    int //use in case you see bufio.Scanner: token too long
 		GCPercent          int
+		ForceQuitTimeSec   int
 	}
 
 	DestPlaceholders struct {
@@ -89,6 +90,11 @@ func (c *Config) init() error {
 	if c.GCPercent < 1 || c.GCPercent > 100 {
 		c.GCPercent = 100
 	}
+
+	if c.ForceQuitTimeSec < 1 {
+		c.ForceQuitTimeSec = 180
+	}
+
 	return nil
 }
 
@@ -248,6 +254,14 @@ func (c *Config) validateRequired(prefix string) error {
 	required2 := map[string]string{
 		"Driver": c.JournalConnection.Driver,
 		"DSN":    c.JournalConnection.Dsn,
+	}
+
+	if c.Endpoint == nil {
+		return fmt.Errorf("%s %s was nil", prefix, "Endpoint")
+	}
+
+	if c.Endpoint.Port == 0 {
+		return fmt.Errorf("%s %s equals 0", prefix, "Endpoint.Port")
 	}
 
 	for field, value := range required2 {

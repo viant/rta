@@ -3,7 +3,11 @@ package mergefs
 import (
 	"context"
 	"github.com/viant/rta/mergefs/config"
+	"log"
+	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 )
 
 func RunApp(configURL string) error {
@@ -16,10 +20,20 @@ func RunApp(configURL string) error {
 		return err
 	}
 
-	if cfg.GCPercent > 0 && cfg.GCPercent < 100 {
+	if cfg.GCPercent > 0 && cfg.GCPercent <= 100 {
 		debug.SetGCPercent(cfg.GCPercent)
 	}
 
-	merger.MergeInBackground()
+	log.Printf("started rta-mergefs endpoint: %v\n", cfg.Endpoint.Port)
+
+	ctxGlobal, cancelGlobal := context.WithCancel(context.Background())
+	defer cancelGlobal()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go merger.shutDownOnInterrupt(sigCh, cancelGlobal)
+
+	merger.MergeInBackground(ctxGlobal)
 	return nil
 }

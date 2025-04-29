@@ -49,19 +49,28 @@ type Service struct {
 }
 
 // MergeInBackground merges in background
-func (s *Service) MergeInBackground(wg *sync.WaitGroup) {
+func (s *Service) MergeInBackground(ctxGlobal context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
+		if ctxGlobal.Err() != nil {
+			fmt.Printf("graceful shutdown - successfully interrupted loop in MergeInBackground [%s] due to: %v\n", s.config.Dest, ctxGlobal.Err())
+			return
+		}
+
 		startTime := time.Now()
-		errorSlc := s.Merge(context.Background())
+		errorSlc := s.Merge(context.Background(), ctxGlobal) // pass context.Background() to avoid canceling the main loop
 		for _, err := range errorSlc {
 			log.Printf("%s failed to merge table %s due to: %v", logPrefix, s.config.Dest, err)
 		}
 		elapsed := time.Since(startTime)
-		thinkTime := s.config.ThinkTime() - elapsed
-		if thinkTime > 0 {
-			time.Sleep(thinkTime)
+		thinkTimeDur := s.config.ThinkTime() - elapsed
+
+		select {
+		case <-ctxGlobal.Done():
+			fmt.Printf("graceful shutdown - successfully interrupted loop in MergeInBackground [%s] during sleep due to: %v\n", s.config.Dest, ctxGlobal.Err())
+			return
+		case <-time.After(thinkTimeDur):
 		}
 	}
 }
@@ -331,7 +340,7 @@ func updatePart(alias string, aggregableSums string, aggregableMaxs string, over
 	return updateDDL + updateClause
 }
 
-func (s *Service) Merge(ctx context.Context) []error {
+func (s *Service) Merge(ctx context.Context, ctxGlobal context.Context) []error {
 	timeout := s.config.Timeout()
 	stats := stat.New()
 	onDone := s.counter.Begin(time.Now())
@@ -358,20 +367,25 @@ func (s *Service) Merge(ctx context.Context) []error {
 	}
 
 	if s.config.Collector != nil {
-		errorSlc = s.mergeJournalsWithCollector(ctx, journals, timeout, stats)
+		errorSlc = s.mergeJournalsWithCollector(ctx, ctxGlobal, journals, timeout, stats)
 	} else {
-		errorSlc = s.mergeJournals(ctx, journals, timeout, stats)
+		errorSlc = s.mergeJournals(ctx, ctxGlobal, journals, timeout, stats)
 	}
 
 	return errorSlc
 }
 
-func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) []error {
+func (s *Service) mergeJournals(ctx context.Context, ctxGlobal context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) []error {
 	var err error
 	errorSlc := make([]error, 0)
 
 	// Process each journal with its own context and optional think time
 	for _, journal := range journals {
+		if ctxGlobal.Err() != nil {
+			fmt.Printf("graceful shutdown - successfully interrupted loop in mergeJournals [%s] due to: %v\n", s.config.JournalTable, ctxGlobal.Err())
+			return errorSlc
+		}
+
 		journalCtx, procCancel := context.WithTimeout(ctx, timeout)
 		startTime := time.Now()
 		// don't collect all errors, return first maxErrLogCnt
@@ -380,17 +394,21 @@ func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalF
 			errorSlc = append(errorSlc, err)
 		}
 		elapsed := time.Since(startTime)
-		thinkTime := s.config.ThinkTimeJournal() - elapsed
-		if thinkTime > 0 {
-			time.Sleep(thinkTime)
-		}
+		thinkTimeDur := s.config.ThinkTimeJournal() - elapsed
 		procCancel()
+
+		select {
+		case <-ctxGlobal.Done():
+			fmt.Printf("graceful shutdown - successfully interrupted loop in mergeJournals [%s] during sleep due to: %v\n", s.config.JournalTable, ctxGlobal.Err())
+			return errorSlc
+		case <-time.After(thinkTimeDur):
+		}
 	}
 
 	return errorSlc
 }
 
-func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) []error {
+func (s *Service) mergeJournalsWithCollector(ctx context.Context, ctxGlobal context.Context, journals []*domain.JournalFs, timeout time.Duration, stats *stat.Values) []error {
 	jnCnt := len(journals)
 	if jnCnt == 0 {
 		return nil
@@ -410,6 +428,11 @@ func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*do
 
 	// don't use concurrency, process serially in chunks - prevent mixing data in one batch collector from different chunks
 	for n := 0; n < partCnt; n++ {
+		if ctxGlobal.Err() != nil {
+			fmt.Printf("graceful shutdown - successfully interrupted loop in mergeJournalsWithCollector [%s] due to: %v\n", s.collectorSrv.ID(), ctxGlobal.Err())
+			return errorSlc
+		}
+
 		begin := n * chunkSize
 		end := (n + 1) * chunkSize
 		if n == partCnt-1 { // the last part
@@ -423,11 +446,15 @@ func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*do
 			errorSlc = append(errorSlc, err)
 		}
 		elapsed := time.Since(startTime)
-		thinkTime := s.config.ThinkTimeJournal() - elapsed
-		if thinkTime > 0 {
-			time.Sleep(thinkTime)
-		}
+		thinkTimeDur := s.config.ThinkTimeJournal() - elapsed
 		cancel()
+
+		select {
+		case <-ctxGlobal.Done():
+			fmt.Printf("graceful shutdown - successfully interrupted loop in mergeJournalsWithCollector [%s] during sleep due to: %v\n", s.collectorSrv.ID(), ctxGlobal.Err())
+			return errorSlc
+		case <-time.After(thinkTimeDur):
+		}
 	}
 
 	return errorSlc
