@@ -3,6 +3,7 @@ package signal
 import (
 	"fmt"
 	"strconv"
+	"sync"
 )
 
 func Key(record interface{}) interface{} {
@@ -30,15 +31,41 @@ func Key(record interface{}) interface{} {
 	}
 }
 
-func stringKey(id int, bucket int, value string) string {
-	key := uint64(id) & 0xFFFFFFFF00000000 // keep upper 32 bits (dayKey), clear lower (modulo value result)
-	key |= uint64(uint32(bucket))          // set new lower 32 bits from bucket
+const (
+	// max digits in an unsigned 64-bit decimal + 1 for '/'
+	maxKeyPrefix = 20 + 1
+)
 
-	// the max number of digits in a uint64 is 20
-	buf := make([]byte, 0, 21+len(value)) // 20 digits + 1 separator + 20 digits
+var stringKeyPool = sync.Pool{
+	New: func() interface{} {
+		// start with a buffer that's hopefully large enough for most uses
+		return make([]byte, 0, 64)
+	},
+}
+
+// stringKey combines the upper 32 bits of `id` with `bucket` in the low 32 bits,
+// then appends "/" + value.  Reuses the buffer via sync.Pool.
+func stringKey(id, bucket int, value string) string {
+	// clear low 32 bits of id, then OR in bucket
+	key := (uint64(id) &^ 0xFFFFFFFF) | uint64(uint32(bucket))
+
+	// grab and reset a buffer
+	buf := stringKeyPool.Get().([]byte)
+	buf = buf[:0]
+
+	// ensure capacity for digits + '/' + value
+	needed := maxKeyPrefix + len(value)
+	if cap(buf) < needed {
+		buf = make([]byte, 0, needed)
+	}
+
+	// write the decimal key
 	buf = strconv.AppendUint(buf, key, 10)
 	buf = append(buf, '/')
 	buf = append(buf, value...)
 
-	return string(buf)
+	// convert to string (one allocation) and return buffer to pool
+	s := string(buf)
+	stringKeyPool.Put(buf)
+	return s
 }
