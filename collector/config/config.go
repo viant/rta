@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	DefaultMapPoolMaxSize = 2
-	DefaultMapSizeInit    = 100
+	DefaultMapSizeInit = 100
 )
 
 type Config struct {
