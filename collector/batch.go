@@ -145,17 +145,18 @@ func (a *Accumulator) Put(key, value interface{}) interface{} {
 	return value
 }
 
-func NewAccumulator(fastMap *FMapPool) *Accumulator {
-	useFastMap := fastMap != nil
-	var fMap *swiss.Map[any, any]
+func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool) *Accumulator {
+	useFastMap := fastMapPool != nil
 	if useFastMap {
-		fMap = fastMap.Get()
+		return &Accumulator{UseFastMap: useFastMap, FastMap: fastMapPool.Get()}
 	}
-	ret := &Accumulator{UseFastMap: useFastMap, FastMap: fMap}
-	if !useFastMap {
-		ret.Map = make(map[interface{}]interface{}, 100)
+
+	useMapPool := mapPool != nil
+	if useMapPool {
+		return &Accumulator{Map: mapPool.Get()}
 	}
-	return ret
+
+	return &Accumulator{Map: make(map[interface{}]interface{}, 100)}
 }
 
 func (b *Batch) removePendingFile(ctx context.Context, fs afs.Service) error {
@@ -215,7 +216,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 			PendingURL:        pendingURL,
 			ID:                UUID.String(),
 			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
-			Accumulator:       NewAccumulator(opts.pool),
+			Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool),
 			Started:           time.Now(),
 			logger:            nil,
 			pendingURLSymLink: pendingURLSymLink,
@@ -264,7 +265,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		PendingURL:        pendingURL,
 		ID:                UUID.String(),
 		Stream:            batchSteam,
-		Accumulator:       NewAccumulator(opts.pool),
+		Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool),
 		Started:           time.Now(),
 		logger:            logger,
 		pendingURLSymLink: pendingURLSymLink,

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/afs"
@@ -62,6 +61,7 @@ type Service struct {
 	randGenerator       *rand.Rand
 	loadCount           int
 	fastMapPool         *FMapPool
+	mapPool             *MapPool
 	category            string
 }
 
@@ -183,6 +183,9 @@ func (s *Service) getBatch() (*Batch, error) {
 	}
 	if s.fastMapPool != nil {
 		s.options = append(s.options, WithFastMapPool(s.fastMapPool))
+	}
+	if s.mapPool != nil {
+		s.options = append(s.options, WithMapPool(s.mapPool))
 	}
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
@@ -420,6 +423,14 @@ func (s *Service) closeBatch(ctx context.Context, batch *Batch) error {
 	if acc.FastMap != nil {
 		s.fastMapPool.Put(acc.FastMap)
 	}
+
+	if acc.Map != nil {
+		if s.mapPool != nil {
+			s.mapPool.Put(acc.Map)
+		}
+		acc.Map = make(map[interface{}]interface{})
+	}
+
 	return err
 }
 
@@ -456,7 +467,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 	scanner := bufio.NewScanner(reader)
 	processed := 0
 	failed := 0
-	acc := NewAccumulator(s.fastMapPool)
+	acc := NewAccumulator(s.fastMapPool, s.mapPool)
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
@@ -588,6 +599,11 @@ func New(cfg *config.Config,
 	if cfg.UseFastMap {
 		srv.fastMapPool = NewFMapPool(max(100, cfg.FastMapSize), 2)
 	}
+
+	if cfg.MapPoolCfg != nil {
+		srv.mapPool = NewMapPool(cfg.MapPoolCfg.MapInitSize, cfg.MapPoolCfg.MapMaxSize, cfg.MapPoolCfg.PoolMaxSize)
+	}
+
 	if cfg.LoadDelayMaxMs > 0 {
 		seed := time.Now().UnixNano() + int64(cfg.LoadDelaySeedPart)
 		srv.randGenerator = rand.New(rand.NewSource(seed))
@@ -653,8 +669,7 @@ func (s *Service) FlushOnDemand(ctx context.Context, batch *Batch, cnt int, star
 			batch.ID)
 	}
 
-	err2 := s.closeBatch(ctx, batch)
-	return errors.Join(err, err2)
+	return err
 }
 
 func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err error) {

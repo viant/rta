@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+const (
+	DefaultMapPoolMaxSize = 2
+	DefaultMapSizeInit    = 100
+)
+
 type Config struct {
 	ID                   string
 	Loader               *config.Config
@@ -23,6 +28,7 @@ type Config struct {
 	Stream               *tconfig.Stream
 	UseFastMap           bool
 	FastMapSize          int
+	MapPoolCfg           *MapPoolConfig
 	MaxMessageSize       int
 	Concurrency          int
 	Batch                *Batch
@@ -34,6 +40,12 @@ type Config struct {
 	LoadDelayOnlyOnce    bool
 	Debug                bool
 	Mode                 string
+}
+
+type MapPoolConfig struct {
+	PoolMaxSize int
+	MapInitSize int
+	MapMaxSize  int
 }
 
 func (c *Config) Clone() *Config {
@@ -137,6 +149,15 @@ func (c *Config) Validate() error {
 
 	if c.FsLoaderMaxRetry > 0 && c.FsLoaderRetryDelayMs <= 0 {
 		c.FsLoaderRetryDelayMs = shared.DefaultFsLoadRetryDealyMs
+	}
+
+	if c.MapPoolCfg != nil {
+		if c.MapPoolCfg.PoolMaxSize <= 0 {
+			c.MapPoolCfg.PoolMaxSize = DefaultMapPoolMaxSize
+		}
+		if c.MapPoolCfg.MapInitSize <= 0 {
+			c.MapPoolCfg.MapInitSize = DefaultMapSizeInit
+		}
 	}
 
 	return nil
