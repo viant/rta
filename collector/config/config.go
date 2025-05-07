@@ -43,9 +43,7 @@ type Config struct {
 }
 
 type MapPoolConfig struct {
-	PoolMaxSize int
 	MapInitSize int
-	MapMaxSize  int
 }
 
 func (c *Config) Clone() *Config {
@@ -152,9 +150,6 @@ func (c *Config) Validate() error {
 	}
 
 	if c.MapPoolCfg != nil {
-		if c.MapPoolCfg.PoolMaxSize <= 0 {
-			c.MapPoolCfg.PoolMaxSize = DefaultMapPoolMaxSize
-		}
 		if c.MapPoolCfg.MapInitSize <= 0 {
 			c.MapPoolCfg.MapInitSize = DefaultMapSizeInit
 		}

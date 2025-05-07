@@ -601,7 +601,7 @@ func New(cfg *config.Config,
 	}
 
 	if cfg.MapPoolCfg != nil {
-		srv.mapPool = NewMapPool(cfg.MapPoolCfg.MapInitSize, cfg.MapPoolCfg.MapMaxSize, cfg.MapPoolCfg.PoolMaxSize)
+		srv.mapPool = NewMapPool(cfg.MapPoolCfg.MapInitSize)
 	}
 
 	if cfg.LoadDelayMaxMs > 0 {

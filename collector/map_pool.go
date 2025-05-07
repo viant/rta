@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"fmt"
 	"github.com/dolthub/swiss"
 	"github.com/viant/rta/collector/fmap"
 	"sync"
@@ -46,52 +45,37 @@ func NewFMapPool(expectedSize int, allocSize int) *FMapPool {
 // MapPool is a pool of ready-to-use maps.
 // It holds up to cap(p.pool) maps; excess returned maps are dropped.
 type MapPool struct {
-	pool        chan map[interface{}]interface{}
+	pool        sync.Pool
 	mapInitSize int
-	mapMaxSize  int
-	poolMaxSize int
 }
 
 // NewMapPool creates a new MapPool
-func NewMapPool(mapInitSize, mapMaxSize, poolMaxSize int) *MapPool {
-	p := &MapPool{
-		pool:        make(chan map[interface{}]interface{}, poolMaxSize),
-		poolMaxSize: poolMaxSize,
+func NewMapPool(mapInitSize int) *MapPool {
+	ret := &MapPool{
 		mapInitSize: mapInitSize,
-		mapMaxSize:  mapMaxSize,
 	}
-	return p
+
+	ret.pool = sync.Pool{
+		New: func() interface{} {
+			m := make(map[interface{}]interface{}, mapInitSize)
+			return m
+		},
+	}
+
+	return ret
 }
 
 // Get returns a map from the pool or allocates a fresh one if the pool is empty.
 func (p *MapPool) Get() map[interface{}]interface{} {
-	select {
-	case m := <-p.pool:
-		return m
-	default:
-		m := make(map[interface{}]interface{}, p.mapInitSize)
-		return m
-	}
+	v := p.pool.Get()
+	aMap := v.(map[interface{}]interface{})
+	return aMap
 }
 
 // Put resets the map and returns it to the pool.
-// If the pool is already full or len(m) > mapMaxSize, the map is simply discarded.
-func (p *MapPool) Put(m map[interface{}]interface{}) {
-	size := len(m)
-	for k := range m {
-		delete(m, k)
+func (p *MapPool) Put(aMap map[interface{}]interface{}) {
+	for k, _ := range aMap {
+		delete(aMap, k)
 	}
-
-	if p.mapMaxSize > 0 && size > p.mapMaxSize {
-		fmt.Printf("Warning: MapPool: map size %d exceeds max size %d, discarding map (it won't be back to the pool)\n", size, p.mapMaxSize)
-		return
-	}
-
-	select {
-	case p.pool <- m:
-		// returned to pool
-	default:
-		fmt.Printf("Warning: MapPool is full, discarding map (it won't be back to the pool)\n")
-		// pool full, drop it
-	}
+	p.pool.Put(aMap)
 }
