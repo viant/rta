@@ -39,6 +39,7 @@ type Config struct {
 	LoadDelayOnlyOnce    bool
 	Debug                bool
 	Mode                 string
+	UseSharedAccumulator bool
 }
 
 type MapPoolConfig struct {

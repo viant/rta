@@ -41,6 +41,8 @@ type (
 		FastMap    *swiss.Map[any, any]
 		size       uint32
 		sync.RWMutex
+		UseShardedAcc      bool // if true, use sharded accumulator
+		ShardedAccumulator *ShardedAccumulator
 	}
 )
 
@@ -67,12 +69,22 @@ func (b *Batch) ensureNoPending() {
 }
 
 func (a *Accumulator) Len() int {
+
+	if a.UseShardedAcc {
+		return a.ShardedAccumulator.Len()
+	}
 	return int(atomic.LoadUint32(&a.size))
 }
 
 func (a *Accumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
 	var data interface{}
 	var ok bool
+
+	if a.UseShardedAcc {
+		data, ok = a.ShardedAccumulator.GetOrCreate(key, get)
+		return data, ok
+	}
+
 	if a.UseFastMap {
 		data, ok = a.tryGet(key)
 		if ok && data != nil {
@@ -129,6 +141,12 @@ func (a *Accumulator) tryGet(key interface{}) (data interface{}, ok bool) {
 }
 
 func (a *Accumulator) Put(key, value interface{}) interface{} {
+
+	if a.UseShardedAcc {
+		a.ShardedAccumulator.Put(key, value)
+		return value
+	}
+
 	a.RWMutex.Lock()
 	defer a.RWMutex.Unlock()
 	if a.UseFastMap {
@@ -145,7 +163,14 @@ func (a *Accumulator) Put(key, value interface{}) interface{} {
 	return value
 }
 
-func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool) *Accumulator {
+func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool, useShardedAcc bool) *Accumulator {
+	if useShardedAcc {
+		return &Accumulator{
+			UseShardedAcc:      useShardedAcc,
+			ShardedAccumulator: NewShardedAccumulator(1000), // default Shard count
+		}
+	}
+
 	useFastMap := fastMapPool != nil
 	if useFastMap {
 		return &Accumulator{UseFastMap: useFastMap, FastMap: fastMapPool.Get()}
@@ -216,7 +241,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 			PendingURL:        pendingURL,
 			ID:                UUID.String(),
 			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
-			Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool),
+			Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.useShardedAcc),
 			Started:           time.Now(),
 			logger:            nil,
 			pendingURLSymLink: pendingURLSymLink,
@@ -265,7 +290,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		PendingURL:        pendingURL,
 		ID:                UUID.String(),
 		Stream:            batchSteam,
-		Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool),
+		Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.useShardedAcc),
 		Started:           time.Now(),
 		logger:            logger,
 		pendingURLSymLink: pendingURLSymLink,

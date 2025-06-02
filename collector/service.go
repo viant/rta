@@ -63,6 +63,7 @@ type Service struct {
 	fastMapPool         *FMapPool
 	mapPool             *MapPool
 	category            string
+	useShardedAcc       bool // if true, use sharded accumulator
 }
 
 func (s *Service) NotifyWatcher() {
@@ -467,7 +468,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 	scanner := bufio.NewScanner(reader)
 	processed := 0
 	failed := 0
-	acc := NewAccumulator(s.fastMapPool, s.mapPool)
+	acc := NewAccumulator(s.fastMapPool, s.mapPool, s.useShardedAcc)
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
@@ -598,6 +599,10 @@ func New(cfg *config.Config,
 
 	if cfg.UseFastMap {
 		srv.fastMapPool = NewFMapPool(max(100, cfg.FastMapSize), 2)
+	}
+
+	if cfg.UseSharedAccumulator {
+		srv.useShardedAcc = cfg.UseSharedAccumulator
 	}
 
 	if cfg.MapPoolCfg != nil {

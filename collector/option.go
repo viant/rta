@@ -11,6 +11,7 @@ type (
 		keyPtrFn            func(record interface{}, ptr interface{})
 		fsLoader            loader2.Loader
 		category            string
+		useShardedAcc       bool // if true, use sharded accumulator
 	}
 
 	Option func(o *Options)
@@ -72,6 +73,12 @@ func (o *Options) Apply(opts ...Option) {
 	}
 	for _, opt := range opts {
 		opt(o)
+	}
+}
+
+func WithUseShardedAcc(useShardedAcc bool) Option {
+	return func(o *Options) {
+		o.useShardedAcc = useShardedAcc
 	}
 }
 
