@@ -11,7 +11,7 @@ type (
 		keyPtrFn            func(record interface{}, ptr interface{})
 		fsLoader            loader2.Loader
 		category            string
-		useShardedAcc       bool // if true, use sharded accumulator
+		shardAccPool        *ShardAccPool
 	}
 
 	Option func(o *Options)
@@ -76,9 +76,9 @@ func (o *Options) Apply(opts ...Option) {
 	}
 }
 
-func WithUseShardedAcc(useShardedAcc bool) Option {
+func WithShardAccPool(shardAccPool *ShardAccPool) Option {
 	return func(o *Options) {
-		o.useShardedAcc = useShardedAcc
+		o.shardAccPool = shardAccPool
 	}
 }
 

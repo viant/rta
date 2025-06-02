@@ -18,17 +18,17 @@ type ShardedAccumulator struct {
 	count  uint32
 }
 
-// NewShardedAccumulator creates a ShardedAccumulator with the given number of shards.
-func NewShardedAccumulator(shardCount int) *ShardedAccumulator {
-	s := &ShardedAccumulator{
-		Shards: make([]*Shard, shardCount),
-		count:  uint32(shardCount),
-	}
-	for i := 0; i < shardCount; i++ {
-		s.Shards[i] = &Shard{M: make(map[interface{}]interface{})}
-	}
-	return s
-}
+//// NewShardedAccumulator creates a ShardedAccumulator with the given number of shards.
+//func NewShardedAccumulator(shardCount int, mapPool *MapPool) *ShardedAccumulator {
+//	s := &ShardedAccumulator{
+//		Shards: make([]*Shard, shardCount),
+//		count:  uint32(shardCount),
+//	}
+//	for i := 0; i < shardCount; i++ {
+//		s.Shards[i] = &Shard{M: mapPool.Get()}
+//	}
+//	return s
+//}
 
 // getShard chooses a Shard based on the hash of the key.
 func (a *ShardedAccumulator) getShard(key interface{}) *Shard {

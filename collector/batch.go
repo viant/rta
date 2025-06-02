@@ -163,11 +163,12 @@ func (a *Accumulator) Put(key, value interface{}) interface{} {
 	return value
 }
 
-func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool, useShardedAcc bool) *Accumulator {
-	if useShardedAcc {
+func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool, sharedAccPool *ShardAccPool) *Accumulator {
+	if sharedAccPool != nil {
 		return &Accumulator{
-			UseShardedAcc:      useShardedAcc,
-			ShardedAccumulator: NewShardedAccumulator(500), // default Shard count
+			UseShardedAcc:      true,
+			ShardedAccumulator: sharedAccPool.Get(), // default Shard count
+
 		}
 	}
 
@@ -241,7 +242,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 			PendingURL:        pendingURL,
 			ID:                UUID.String(),
 			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
-			Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.useShardedAcc),
+			Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.shardAccPool),
 			Started:           time.Now(),
 			logger:            nil,
 			pendingURLSymLink: pendingURLSymLink,
@@ -290,7 +291,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		PendingURL:        pendingURL,
 		ID:                UUID.String(),
 		Stream:            batchSteam,
-		Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.useShardedAcc),
+		Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.shardAccPool),
 		Started:           time.Now(),
 		logger:            logger,
 		pendingURLSymLink: pendingURLSymLink,

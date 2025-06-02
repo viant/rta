@@ -64,6 +64,7 @@ type Service struct {
 	mapPool             *MapPool
 	category            string
 	useShardedAcc       bool // if true, use sharded accumulator
+	shardAccPool        *ShardAccPool
 }
 
 func (s *Service) NotifyWatcher() {
@@ -188,6 +189,10 @@ func (s *Service) getBatch() (*Batch, error) {
 	if s.mapPool != nil {
 		s.options = append(s.options, WithMapPool(s.mapPool))
 	}
+	if s.shardAccPool != nil {
+		s.options = append(s.options, WithShardAccPool(s.shardAccPool))
+	}
+
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
 		return nil, err
@@ -354,13 +359,14 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 	flushLog := ""
 
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
-	if batch.Accumulator.Len() != 0 {
+	batchLen := batch.Accumulator.Len()
+	if batchLen != 0 {
 		data := s.mapperFn(batch.Accumulator)
 		startPrimary := time.Now()
 		var err error
 		if primarySubLog, err = s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
-			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
+			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batchLen, batch.ID, err)
 			stats.Append(err2)
 			return "", err2
 		}
@@ -372,7 +378,7 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 			err, retries := s.retryFsLoadIfNeeded(batch.ID, err, ctx, data)
 			if err != nil {
 				err2 := fmt.Errorf("flush warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s%s) due to: %w",
-					s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, retries, err)
+					s.instanceId, s.category, batchLen, batch.ID, retries, err)
 				log.Println(err2.Error())
 				stats.Append(err2)
 			}
@@ -432,6 +438,12 @@ func (s *Service) closeBatch(ctx context.Context, batch *Batch) error {
 		acc.Map = make(map[interface{}]interface{})
 	}
 
+	if s.useShardedAcc && acc.ShardedAccumulator != nil {
+		s.shardAccPool.Put(acc.ShardedAccumulator)
+		acc = nil
+		batch = nil
+	}
+
 	return err
 }
 
@@ -468,7 +480,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 	scanner := bufio.NewScanner(reader)
 	processed := 0
 	failed := 0
-	acc := NewAccumulator(s.fastMapPool, s.mapPool, s.useShardedAcc)
+	acc := NewAccumulator(s.fastMapPool, s.mapPool, s.shardAccPool)
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
@@ -601,13 +613,19 @@ func New(cfg *config.Config,
 		srv.fastMapPool = NewFMapPool(max(100, cfg.FastMapSize), 2)
 	}
 
-	if cfg.UseSharedAccumulator {
-		srv.useShardedAcc = cfg.UseSharedAccumulator
+	if cfg.UseShardAccumulator {
+		srv.useShardedAcc = cfg.UseShardAccumulator
 	}
 
 	if cfg.MapPoolCfg != nil {
 		srv.mapPool = NewMapPool(cfg.MapPoolCfg.MapInitSize)
 	}
+
+	if cfg.UseShardAccumulator {
+		srv.shardAccPool = NewShardAccPool(100, 500)
+	}
+	// TODO
+	//
 
 	if cfg.LoadDelayMaxMs > 0 {
 		seed := time.Now().UnixNano() + int64(cfg.LoadDelaySeedPart)
