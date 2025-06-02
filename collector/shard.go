@@ -1,7 +1,7 @@
 package collector
 
 import (
-	"fmt"
+	"github.com/viant/toolbox"
 	"hash/fnv"
 	"sync"
 )
@@ -33,7 +33,8 @@ func NewShardedAccumulator(shardCount int) *ShardedAccumulator {
 // getShard chooses a Shard based on the hash of the key.
 func (a *ShardedAccumulator) getShard(key interface{}) *Shard {
 	h := fnv.New32a()
-	h.Write([]byte(fmt.Sprint(key)))
+	h.Write([]byte(toolbox.AsString(key))) // TODO use toolbox.
+
 	idx := h.Sum32() % a.count
 	//	fmt.Printf("###@@@ Key: %v, Hash: %d, Shard Index: %d\n", key, h.Sum32(), idx)
 	return a.Shards[idx]
@@ -82,9 +83,9 @@ func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}
 func (a *ShardedAccumulator) Len() int {
 	total := 0
 	for _, sh := range a.Shards {
-		sh.mux.RLock()
+		//sh.mux.RLock()
 		total += len(sh.M)
-		sh.mux.RUnlock()
+		//sh.mux.RUnlock()
 	}
 	return total
 }
