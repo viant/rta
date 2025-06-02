@@ -167,7 +167,7 @@ func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool, useShardedAcc bool)
 	if useShardedAcc {
 		return &Accumulator{
 			UseShardedAcc:      useShardedAcc,
-			ShardedAccumulator: NewShardedAccumulator(1000), // default Shard count
+			ShardedAccumulator: NewShardedAccumulator(500), // default Shard count
 		}
 	}
 
