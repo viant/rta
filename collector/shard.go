@@ -12,6 +12,7 @@ import (
 type Shard struct {
 	mux sync.RWMutex
 	M   map[interface{}]interface{}
+	hot sync.Map // map[interface{}]interface{}
 }
 
 // ShardedAccumulator splits a big map into multiple shards to reduce contention.
@@ -44,24 +45,25 @@ func (a *ShardedAccumulator) getShardOld(key interface{}) *Shard {
 }
 
 func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
-	// 1) Try the hot‐cache (sync.Map). No locks.
-	if v, ok := a.hot.Load(key); ok {
-		return v, true
-	}
 
 	// 2) Fall back into the shard (mutex‐protected).
 	sh := a.getShard(key)
 
-	// Read‐check under RLock
-	sh.mux.RLock()
-	if v, ok := sh.M[key]; ok {
-		sh.mux.RUnlock()
-
-		//// Promote into hot cache so future reads skip the shard entirely:
-		//a.hot.Store(key, v)
+	// 1) Try the hot‐cache (sync.Map). No locks.
+	if v, ok := sh.hot.Load(key); ok {
 		return v, true
 	}
-	sh.mux.RUnlock()
+
+	//// Read‐check under RLock
+	//sh.mux.RLock()
+	//if v, ok := sh.M[key]; ok {
+	//	sh.mux.RUnlock()
+	//
+	//	//// Promote into hot cache so future reads skip the shard entirely:
+	//	//a.hot.Store(key, v)
+	//	return v, true
+	//}
+	//sh.mux.RUnlock()
 
 	// 3) Missed in shard → do double‐checked write path
 	sh.mux.Lock()
@@ -78,7 +80,7 @@ func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}
 	sh.mux.Unlock()
 
 	// Also store into hot cache
-	a.hot.Store(key, value)
+	sh.hot.Store(key, value)
 	return value, true
 }
 

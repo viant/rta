@@ -49,6 +49,11 @@ func (p *ShardAccPool) Put(acc *ShardedAccumulator) {
 		for k, _ := range aShard.M {
 			delete(aShard.M, k)
 		}
+
+		aShard.hot.Range(func(key, value interface{}) bool {
+			aShard.hot.Delete(key)
+			return true
+		})
 	}
 
 	p.pool.Put(acc)
