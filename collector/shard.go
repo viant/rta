@@ -18,6 +18,7 @@ type Shard struct {
 type ShardedAccumulator struct {
 	Shards []*Shard
 	count  uint32
+	hot    sync.Map // map[interface{}]interface{}
 }
 
 //// NewShardedAccumulator creates a ShardedAccumulator with the given number of shards.
@@ -42,28 +43,42 @@ func (a *ShardedAccumulator) getShardOld(key interface{}) *Shard {
 	return a.Shards[idx]
 }
 
-// GetOrCreate returns the existing value for key or calls get() to create, store, and return it.
 func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
+	// 1) Try the hot‐cache (sync.Map). No locks.
+	if v, ok := a.hot.Load(key); ok {
+		return v, true
+	}
+
+	// 2) Fall back into the shard (mutex‐protected).
 	sh := a.getShard(key)
 
-	// First, try the read path.
+	// Read‐check under RLock
 	sh.mux.RLock()
 	if v, ok := sh.M[key]; ok {
 		sh.mux.RUnlock()
+
+		//// Promote into hot cache so future reads skip the shard entirely:
+		//a.hot.Store(key, v)
 		return v, true
 	}
 	sh.mux.RUnlock()
 
-	// Write path with double-check.
+	// 3) Missed in shard → do double‐checked write path
 	sh.mux.Lock()
 	if existing, ok := sh.M[key]; ok {
 		sh.mux.Unlock()
+		//// Promote into hot cache before returning
+		//a.hot.Store(key, existing)
 		return existing, true
 	}
+
+	// Actually compute and insert
 	value := get()
 	sh.M[key] = value
 	sh.mux.Unlock()
 
+	// Also store into hot cache
+	a.hot.Store(key, value)
 	return value, true
 }
 
