@@ -615,17 +615,12 @@ func New(cfg *config.Config,
 
 	if cfg.UseShardAccumulator {
 		srv.useShardedAcc = cfg.UseShardAccumulator
+		srv.shardAccPool = NewShardAccPool(100, 500)
 	}
 
 	if cfg.MapPoolCfg != nil {
 		srv.mapPool = NewMapPool(cfg.MapPoolCfg.MapInitSize)
 	}
-
-	if cfg.UseShardAccumulator {
-		srv.shardAccPool = NewShardAccPool(100, 500)
-	}
-	// TODO
-	//
 
 	if cfg.LoadDelayMaxMs > 0 {
 		seed := time.Now().UnixNano() + int64(cfg.LoadDelaySeedPart)
