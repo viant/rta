@@ -679,12 +679,13 @@ func (s *Service) IsUp() bool {
 
 func (s *Service) FlushOnDemand(ctx context.Context, batch *Batch, cnt int, startFlushScheduledBatches *time.Time) error {
 	elapsedMergeBatch := time.Now().Sub(*startFlushScheduledBatches)
+	batchCnt := batch.Accumulator.Len()
 	flushSubLog, err := s.Flush(batch)
 	elapsedTotal := time.Now().Sub(*startFlushScheduledBatches)
 	if err == nil && s.config.Debug {
 		fmt.Printf("successfully flushed %s rows:%d, batchCnt:%d, total:%v, merge:%v, %v, %v\n",
 			s.instanceId,
-			batch.Accumulator.Len(), cnt,
+			batchCnt, cnt,
 			elapsedTotal, elapsedMergeBatch,
 			flushSubLog,
 			batch.ID)
@@ -732,6 +733,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	elapsedMergeBatch := time.Now().Sub(startMergeBatch)
 
+	masterCnt := masterBatch.Accumulator.Len()
 	flushSubLog, err := s.Flush(masterBatch)
 
 	elapsedTotal := time.Now().Sub(startFlushScheduledBatches)
@@ -742,7 +744,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		if s.config.Debug {
 			fmt.Printf("successfully flushed [%s, %s] rows:%d, batchCnt:%d, total:%v, merge:%v, %v, %v\n",
 				s.instanceId, s.category,
-				masterBatch.Accumulator.Len(), len(batchesToFlushNow),
+				masterCnt, len(batchesToFlushNow),
 				elapsedTotal, elapsedMergeBatch,
 				flushSubLog,
 				masterBatch.ID)
@@ -818,7 +820,14 @@ func (s *Service) watchActiveBatch() {
 
 func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
 	var items []interface{}
-	if from.Accumulator.UseFastMap {
+	if from.Accumulator.ShardedAccumulator != nil {
+		items = make([]interface{}, 0, from.Accumulator.ShardedAccumulator.Len())
+		for _, sh := range from.Accumulator.ShardedAccumulator.Shards {
+			for _, value := range sh.M {
+				items = append(items, value)
+			}
+		}
+	} else if from.Accumulator.UseFastMap {
 		items = make([]interface{}, 0, from.Accumulator.FastMap.Count())
 		from.Accumulator.FastMap.Iter(func(k any, value any) (stop bool) {
 			items = append(items, value)
