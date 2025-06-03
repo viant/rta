@@ -40,6 +40,7 @@ type Config struct {
 	Debug                bool
 	Mode                 string
 	UseShardAccumulator  bool
+	ShardCnt             int
 }
 
 type MapPoolConfig struct {

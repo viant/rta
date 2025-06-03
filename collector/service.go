@@ -615,7 +615,10 @@ func New(cfg *config.Config,
 
 	if cfg.UseShardAccumulator {
 		srv.useShardedAcc = cfg.UseShardAccumulator
-		srv.shardAccPool = NewShardAccPool(100, 100)
+		if cfg.ShardCnt <= 0 {
+			cfg.ShardCnt = 10
+		}
+		srv.shardAccPool = NewShardAccPool(100, cfg.ShardCnt)
 	}
 
 	if cfg.MapPoolCfg != nil {
