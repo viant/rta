@@ -2,6 +2,8 @@ package collector
 
 import (
 	"encoding/binary"
+	"github.com/dolthub/swiss"
+	"github.com/viant/rta/collector/fmap"
 	"github.com/viant/toolbox"
 	"hash/fnv"
 	"sync"
@@ -10,16 +12,19 @@ import (
 
 // Shard holds a subset of the map with its own lock.
 type Shard struct {
-	mux sync.RWMutex
-	M   map[interface{}]interface{}
-	hot sync.Map // map[interface{}]interface{}
+	mux     sync.RWMutex
+	M       map[interface{}]interface{}
+	hot     sync.Map // map[interface{}]interface{}
+	FastMap *swiss.Map[any, any]
 }
 
 // ShardedAccumulator splits a big map into multiple shards to reduce contention.
 type ShardedAccumulator struct {
-	Shards []*Shard
-	count  uint32
-	hot    sync.Map // map[interface{}]interface{}
+	UseFastMap bool
+	Shards     []*Shard
+	count      uint32
+	//hot        sync.Map // map[interface{}]interface{}
+
 }
 
 //// NewShardedAccumulator creates a ShardedAccumulator with the given number of shards.
@@ -44,45 +49,52 @@ func (a *ShardedAccumulator) getShardOld(key interface{}) *Shard {
 	return a.Shards[idx]
 }
 
-func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
-
-	// 2) Fall back into the shard (mutex‐protected).
-	sh := a.getShard(key)
-
-	// 1) Try the hot‐cache (sync.Map). No locks.
-	if v, ok := sh.hot.Load(key); ok {
-		return v, true
-	}
-
-	//// Read‐check under RLock
-	//sh.mux.RLock()
-	//if v, ok := sh.M[key]; ok {
-	//	sh.mux.RUnlock()
-	//
-	//	//// Promote into hot cache so future reads skip the shard entirely:
-	//	//a.hot.Store(key, v)
-	//	return v, true
-	//}
-	//sh.mux.RUnlock()
-
-	// 3) Missed in shard → do double‐checked write path
-	sh.mux.Lock()
-	if existing, ok := sh.M[key]; ok {
-		sh.mux.Unlock()
-		//// Promote into hot cache before returning
-		//a.hot.Store(key, existing)
-		return existing, true
-	}
-
-	// Actually compute and insert
-	value := get()
-	sh.M[key] = value
-	sh.mux.Unlock()
-
-	// Also store into hot cache
-	sh.hot.Store(key, value)
-	return value, true
-}
+//func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
+//
+//	// 2) Fall back into the shard (mutex‐protected).
+//	sh := a.getShard(key)
+//
+//	// 1) Try the hot‐cache (sync.Map). No locks.
+//
+//	//if v, ok := sh.hot.Load(key); ok {
+//	//	return v, true
+//	//}
+//
+//	data, ok := a.tryGet(key, sh)
+//	if ok && data != nil {
+//		return data, ok
+//	}
+//
+//	//// Read‐check under RLock
+//	//sh.mux.RLock()
+//	//if v, ok := sh.M[key]; ok {
+//	//	sh.mux.RUnlock()
+//	//
+//	//	//// Promote into hot cache so future reads skip the shard entirely:
+//	//	//a.hot.Store(key, v)
+//	//	return v, true
+//	//}
+//	//sh.mux.RUnlock()
+//
+//	// 3) Missed in shard → do double‐checked write path
+//	sh.mux.Lock()
+//	if existing, ok := sh.M[key]; ok {
+//		sh.mux.Unlock()
+//		//// Promote into hot cache before returning
+//		//a.hot.Store(key, existing)
+//		return existing, true
+//	}
+//
+//	// Actually compute and insert
+//	value := get()
+//	sh.M[key] = value
+//	sh.mux.Unlock()
+//
+//	// Also store into hot cache
+//	//sh.hot.Store(key, value)
+//	sh.FastMap.Put(key, data)
+//	return value, true
+//}
 
 //func main() {
 //	acc := NewShardedAccumulator(16)
@@ -189,4 +201,74 @@ func last4bytesToUint32(s string) uint32 {
 		x |= uint32(s[i]) << shift
 	}
 	return x
+}
+
+//func (a *ShardedAccumulator) tryGet(key interface{}, shard *Shard) (data interface{}, ok bool) {
+//	defer func() {
+//		if r := recover(); r != nil {
+//			ok = false
+//			data = nil
+//		}
+//	}()
+//	scn := fmap.Residents(shard.FastMap)
+//	data, ok = shard.FastMap.Get(key)
+//	next := fmap.Residents(shard.FastMap)
+//	hasChanged := scn != next
+//	if hasChanged {
+//		ok = false
+//	}
+//	return
+//}
+
+func (a *ShardedAccumulator) tryGet(key interface{}, sh *Shard) (data interface{}, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			// If Swiss panics (e.g. mid-resize), treat it as a miss
+			ok = false
+			data = nil
+		}
+	}()
+
+	// 1) Read the “version” (resident count) before Get
+	scn := fmap.Residents(sh.FastMap)
+
+	// 2) Do a lock-free lookup
+	data, ok = sh.FastMap.Get(key)
+
+	// 3) Read the “version” again
+	next := fmap.Residents(sh.FastMap)
+
+	// 4) If it changed, the table was being mutated/rehashed while we were reading
+	if scn != next {
+		ok = false
+	}
+	return
+}
+
+func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}) (interface{}, bool) {
+	sh := a.getShard(key)
+
+	// 1) First try the Swiss cache (lock-free when no rehash)
+	if data, ok := a.tryGet(key, sh); ok && data != nil {
+		return data, true
+	}
+
+	// 2) Since tryGet failed, fall back to the shard’s own mutex + plain Go map
+	sh.mux.Lock()
+	if existing, ok2 := sh.M[key]; ok2 {
+		sh.mux.Unlock()
+		// (Optionally) “promote” into the FastMap so future reads skip the lock
+		//sh.FastMap.Put(key, existing)
+		return existing, true
+	}
+
+	// 3) We really are the first: compute the value, store into the plain map
+	value := get()
+	sh.M[key] = value
+	sh.mux.Unlock()
+
+	// 4) Now that we have “value,” also cache it in FastMap
+	sh.FastMap.Put(key, value)
+
+	return value, true
 }

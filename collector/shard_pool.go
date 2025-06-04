@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"github.com/dolthub/swiss"
 	"sync"
 )
 
@@ -24,7 +25,10 @@ func NewShardAccPool(initMapSize int, shardCount int) *ShardAccPool {
 				count:  uint32(shardCount),
 			}
 			for i := 0; i < shardCount; i++ {
-				result.Shards[i] = &Shard{M: make(map[interface{}]interface{}, initMapSize)}
+				result.Shards[i] = &Shard{
+					M:       make(map[interface{}]interface{}, initMapSize),
+					FastMap: swiss.NewMap[any, any](uint32(10 * initMapSize)),
+				}
 			}
 
 			return result
@@ -54,6 +58,8 @@ func (p *ShardAccPool) Put(acc *ShardedAccumulator) {
 			aShard.hot.Delete(key)
 			return true
 		})
+
+		aShard.FastMap.Clear()
 	}
 
 	p.pool.Put(acc)
