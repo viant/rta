@@ -12,9 +12,9 @@ import (
 
 // Shard holds a subset of the map with its own lock.
 type Shard struct {
-	mux     sync.RWMutex
-	M       map[interface{}]interface{}
-	hot     sync.Map // map[interface{}]interface{}
+	mux sync.RWMutex
+	//M       map[interface{}]interface{}
+	//hot     sync.Map // map[interface{}]interface{}
 	FastMap *swiss.Map[any, any]
 }
 
@@ -115,7 +115,7 @@ func (a *ShardedAccumulator) Len() int {
 	total := 0
 	for _, sh := range a.Shards {
 		//sh.mux.RLock()
-		total += len(sh.M)
+		total += sh.FastMap.Count()
 		//sh.mux.RUnlock()
 	}
 	return total
@@ -125,7 +125,7 @@ func (a *ShardedAccumulator) Len() int {
 func (a *ShardedAccumulator) Put(key, value interface{}) {
 	sh := a.getShard(key)
 	sh.mux.Lock()
-	sh.M[key] = value
+	sh.FastMap.Put(key, value)
 	sh.mux.Unlock()
 }
 
@@ -255,7 +255,7 @@ func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}
 
 	// 2) Since tryGet failed, fall back to the shard’s own mutex + plain Go map
 	sh.mux.Lock()
-	if existing, ok2 := sh.M[key]; ok2 {
+	if existing, ok2 := sh.FastMap.Get(key); ok2 {
 		sh.mux.Unlock()
 		// (Optionally) “promote” into the FastMap so future reads skip the lock
 		//sh.FastMap.Put(key, existing)
@@ -264,11 +264,8 @@ func (a *ShardedAccumulator) GetOrCreate(key interface{}, get func() interface{}
 
 	// 3) We really are the first: compute the value, store into the plain map
 	value := get()
-	sh.M[key] = value
-	sh.mux.Unlock()
-
-	// 4) Now that we have “value,” also cache it in FastMap
 	sh.FastMap.Put(key, value)
+	sh.mux.Unlock()
 
 	return value, true
 }

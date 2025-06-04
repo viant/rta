@@ -26,7 +26,7 @@ func NewShardAccPool(initMapSize int, shardCount int) *ShardAccPool {
 			}
 			for i := 0; i < shardCount; i++ {
 				result.Shards[i] = &Shard{
-					M:       make(map[interface{}]interface{}, initMapSize),
+					//M:       make(map[interface{}]interface{}, initMapSize),
 					FastMap: swiss.NewMap[any, any](uint32(10 * initMapSize)),
 				}
 			}
@@ -50,14 +50,14 @@ func (p *ShardAccPool) Get() *ShardedAccumulator {
 func (p *ShardAccPool) Put(acc *ShardedAccumulator) {
 	//fmt.Printf("ShardAccPool Put\n")
 	for _, aShard := range acc.Shards {
-		for k, _ := range aShard.M {
-			delete(aShard.M, k)
-		}
-
-		aShard.hot.Range(func(key, value interface{}) bool {
-			aShard.hot.Delete(key)
-			return true
-		})
+		//for k, _ := range aShard.M {
+		//	delete(aShard.M, k)
+		//}
+		//
+		//aShard.hot.Range(func(key, value interface{}) bool {
+		//	aShard.hot.Delete(key)
+		//	return true
+		//})
 
 		aShard.FastMap.Clear()
 	}

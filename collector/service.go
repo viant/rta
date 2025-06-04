@@ -823,9 +823,10 @@ func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) er
 	if from.Accumulator.ShardedAccumulator != nil {
 		items = make([]interface{}, 0, from.Accumulator.ShardedAccumulator.Len())
 		for _, sh := range from.Accumulator.ShardedAccumulator.Shards {
-			for _, value := range sh.M {
+			sh.FastMap.Iter(func(k any, value any) (stop bool) {
 				items = append(items, value)
-			}
+				return false
+			})
 		}
 	} else if from.Accumulator.UseFastMap {
 		items = make([]interface{}, 0, from.Accumulator.FastMap.Count())
