@@ -41,7 +41,7 @@ type (
 		FastMap    *swiss.Map[any, any]
 		size       uint32
 		sync.RWMutex
-		UseShardedAcc      bool // if true, use sharded accumulator
+		UseShardedAcc      bool
 		ShardedAccumulator *ShardedAccumulator
 	}
 )
@@ -167,8 +167,7 @@ func NewAccumulator(fastMapPool *FMapPool, mapPool *MapPool, sharedAccPool *Shar
 	if sharedAccPool != nil {
 		return &Accumulator{
 			UseShardedAcc:      true,
-			ShardedAccumulator: sharedAccPool.Get(), // default Shard count
-
+			ShardedAccumulator: sharedAccPool.Get(),
 		}
 	}
 
@@ -241,7 +240,7 @@ func NewBatch(stream *tconfig.Stream, disabled bool, fs afs.Service, options ...
 		return &Batch{
 			PendingURL:        pendingURL,
 			ID:                UUID.String(),
-			Stream:            &tconfig.Stream{}, // TODO check if nil is also correct
+			Stream:            &tconfig.Stream{},
 			Accumulator:       NewAccumulator(opts.fMapPool, opts.mapPool, opts.shardAccPool),
 			Started:           time.Now(),
 			logger:            nil,

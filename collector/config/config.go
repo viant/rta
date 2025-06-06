@@ -41,6 +41,7 @@ type Config struct {
 	Mode                 string
 	UseShardAccumulator  bool
 	ShardCnt             int
+	ShardMapSize         int
 }
 
 type MapPoolConfig struct {

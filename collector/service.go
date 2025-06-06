@@ -63,7 +63,7 @@ type Service struct {
 	fastMapPool         *FMapPool
 	mapPool             *MapPool
 	category            string
-	useShardedAcc       bool // if true, use sharded accumulator
+	useShardedAcc       bool
 	shardAccPool        *ShardAccPool
 }
 
@@ -618,7 +618,12 @@ func New(cfg *config.Config,
 		if cfg.ShardCnt <= 0 {
 			cfg.ShardCnt = 10
 		}
-		srv.shardAccPool = NewShardAccPool(100, cfg.ShardCnt)
+
+		if cfg.ShardMapSize <= 0 {
+			cfg.ShardMapSize = 10
+		}
+
+		srv.shardAccPool = NewShardAccPool(cfg.ShardMapSize, cfg.ShardCnt)
 	}
 
 	if cfg.MapPoolCfg != nil {
@@ -820,7 +825,7 @@ func (s *Service) watchActiveBatch() {
 
 func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
 	var items []interface{}
-	if from.Accumulator.ShardedAccumulator != nil {
+	if from.Accumulator.UseShardedAcc {
 		items = make([]interface{}, 0, from.Accumulator.ShardedAccumulator.Len())
 		for _, sh := range from.Accumulator.ShardedAccumulator.Shards {
 			sh.FastMap.Iter(func(k any, value any) (stop bool) {

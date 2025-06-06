@@ -5,18 +5,14 @@ import (
 	"sync"
 )
 
-// ShardPool is a pool of ready-to-use maps.
-// It holds up to cap(p.pool) maps; excess returned maps are dropped.
+// ShardAccPool is a pool of pre-sharded Accumulators.
 type ShardAccPool struct {
-	pool     sync.Pool
-	initSize int
+	pool sync.Pool
 }
 
 // NewShardPool creates a new ShardPool
 func NewShardAccPool(initMapSize int, shardCount int) *ShardAccPool {
-	ret := &ShardAccPool{
-		initSize: initMapSize,
-	}
+	ret := &ShardAccPool{}
 
 	ret.pool = sync.Pool{
 		New: func() interface{} {
@@ -26,8 +22,7 @@ func NewShardAccPool(initMapSize int, shardCount int) *ShardAccPool {
 			}
 			for i := 0; i < shardCount; i++ {
 				result.Shards[i] = &Shard{
-					//M:       make(map[interface{}]interface{}, initMapSize),
-					FastMap: swiss.NewMap[any, any](uint32(10 * initMapSize)),
+					FastMap: swiss.NewMap[any, any](uint32(initMapSize)),
 				}
 			}
 
@@ -40,7 +35,6 @@ func NewShardAccPool(initMapSize int, shardCount int) *ShardAccPool {
 
 // Get returns a map from the pool or allocates a fresh one if the pool is empty.
 func (p *ShardAccPool) Get() *ShardedAccumulator {
-	//fmt.Printf("ShardAccPool Get\n")
 	v := p.pool.Get()
 	aShard := v.(*ShardedAccumulator)
 	return aShard
@@ -48,17 +42,7 @@ func (p *ShardAccPool) Get() *ShardedAccumulator {
 
 // Put resets the map and returns it to the pool.
 func (p *ShardAccPool) Put(acc *ShardedAccumulator) {
-	//fmt.Printf("ShardAccPool Put\n")
 	for _, aShard := range acc.Shards {
-		//for k, _ := range aShard.M {
-		//	delete(aShard.M, k)
-		//}
-		//
-		//aShard.hot.Range(func(key, value interface{}) bool {
-		//	aShard.hot.Delete(key)
-		//	return true
-		//})
-
 		aShard.FastMap.Clear()
 	}
 

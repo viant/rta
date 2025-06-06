@@ -63,8 +63,6 @@ func BenchmarkService_ShardAccCollect(b *testing.B) {
 		Loader:         &lconfig.Config{},
 		Stream:         &tconfig.Stream{},
 		StreamDisabled: true,
-		//FastMapSize:    20000,
-		//UseFastMap:     true,
 		Batch: &config.Batch{
 			MaxElements:   10000,
 			MaxDurationMs: int(time.Minute.Milliseconds()),
