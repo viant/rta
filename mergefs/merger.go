@@ -270,6 +270,7 @@ func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) (journal
 		return nil
 	})
 
+	fmt.Printf("debug: read %d journals from table %s\n", len(journals), s.config.JournalTable)
 	return journals, err
 }
 
