@@ -252,7 +252,7 @@ func getLocations(jn []*domain.JournalFs) string {
 }
 
 func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) (journals []*domain.JournalFs, err error) {
-	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v ORDER BY CREATED", s.config.JournalTable, shared.Active)
+	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v AND CREATED > NOW() - INTERVAL 4 MINUTE ORDER BY CREATED", s.config.JournalTable, shared.Active)
 	reader, err := read.New(ctx, db, querySQL, func() interface{} { return &domain.JournalFs{} })
 	if err != nil {
 		return nil, err
