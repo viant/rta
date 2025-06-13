@@ -252,7 +252,13 @@ func getLocations(jn []*domain.JournalFs) string {
 }
 
 func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) (journals []*domain.JournalFs, err error) {
-	querySQL := fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v AND CREATED > NOW() - INTERVAL 4 MINUTE ORDER BY CREATED", s.config.JournalTable, shared.Active)
+	var querySQL string
+	if s.config.CustomJnQuery != "" {
+		querySQL = s.config.CustomJnQuery
+	} else {
+		querySQL = fmt.Sprintf("SELECT * FROM %v WHERE STATUS = %v AND CREATED > NOW() - INTERVAL 4 MINUTE ORDER BY CREATED", s.config.JournalTable, shared.Active)
+	}
+
 	reader, err := read.New(ctx, db, querySQL, func() interface{} { return &domain.JournalFs{} })
 	if err != nil {
 		return nil, err
@@ -270,7 +276,6 @@ func (s *Service) readFromJournalTable(ctx context.Context, db *sql.DB) (journal
 		return nil
 	})
 
-	fmt.Printf("debug: read %d journals from table %s\n", len(journals), s.config.JournalTable)
 	return journals, err
 }
 
@@ -360,10 +365,10 @@ func (s *Service) Merge(ctx context.Context, ctxGlobal context.Context) []error 
 	}
 	cancel() // readCtx only needed for readFromJournalTable
 
+	if s.config.Debug {
+		fmt.Printf("%s found %d journals to process in %s\n", logPrefix, len(journals), s.config.JournalTable)
+	}
 	if len(journals) == 0 {
-		if s.config.Debug {
-			fmt.Printf("%s no journals to process for %s\n", logPrefix, s.config.JournalTable)
-		}
 		return nil
 	}
 
