@@ -213,6 +213,9 @@ func (s *Service) ID() string {
 }
 
 func (s *Service) Collect(record interface{}) error {
+	if record == nil {
+		return fmt.Errorf("collector.Collect: record is nil")
+	}
 	return s.CollectAll(record)
 }
 
