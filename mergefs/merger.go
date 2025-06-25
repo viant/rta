@@ -33,6 +33,7 @@ const (
 	metricURI = "/v1/api/metric/"
 	alias     = "new"
 	logPrefix = config.LogPrefix
+	extraTime = 5 * time.Second
 )
 
 // Service represents a merger service
@@ -66,7 +67,7 @@ func (s *Service) MergeInBackground(wg *sync.WaitGroup) {
 	}
 }
 
-func (s *Service) processJournal(ctx context.Context, journal *domain.JournalFs, db *sql.DB) (err error) {
+func (s *Service) processJournal(ctx context.Context, parentCtx context.Context, journal *domain.JournalFs, db *sql.DB) (err error) {
 	stats := stat.New()
 	onDone := s.journal.Begin(time.Now())
 	defer func() {
@@ -80,6 +81,15 @@ func (s *Service) processJournal(ctx context.Context, journal *domain.JournalFs,
 	if err != nil {
 		return err
 	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < extraTime {
+			extraCtx, cancel := context.WithTimeout(parentCtx, extraTime)
+			ctx = extraCtx
+			defer cancel()
+		}
+	}
+
 	err = s.updateJn(ctx, journal, db, stats)
 	if err != nil {
 		return err
@@ -375,7 +385,7 @@ func (s *Service) mergeJournals(ctx context.Context, journals []*domain.JournalF
 		journalCtx, procCancel := context.WithTimeout(ctx, timeout)
 		startTime := time.Now()
 		// don't collect all errors, return first maxErrLogCnt
-		if err = s.processJournal(journalCtx, journal, s.dbJn); err != nil {
+		if err = s.processJournal(journalCtx, ctx, journal, s.dbJn); err != nil {
 			stats.Append(err)
 			errorSlc = append(errorSlc, err)
 		}
@@ -418,7 +428,7 @@ func (s *Service) mergeJournalsWithCollector(ctx context.Context, journals []*do
 
 		journalCtx, cancel := context.WithTimeout(ctx, timeout)
 		startTime := time.Now()
-		if err := s.processJournalsWithCollector(journalCtx, journals[begin:end], s.dbJn); err != nil {
+		if err := s.processJournalsWithCollector(journalCtx, ctx, journals[begin:end], s.dbJn); err != nil {
 			stats.Append(err)
 			errorSlc = append(errorSlc, err)
 		}
@@ -443,7 +453,7 @@ func appendClause(existing, clause string) string {
 	return existing + ", " + clause
 }
 
-func (s *Service) processJournalsWithCollector(ctx context.Context, journals []*domain.JournalFs, db *sql.DB) (err error) {
+func (s *Service) processJournalsWithCollector(ctx context.Context, parentCtx context.Context, journals []*domain.JournalFs, db *sql.DB) (err error) {
 	stats := stat.New()
 	onDone := s.journal.Begin(time.Now())
 	defer func() {
@@ -477,6 +487,14 @@ func (s *Service) processJournalsWithCollector(ctx context.Context, journals []*
 	err = s.loadWithCollector(ctx, data, &start)
 	if err != nil {
 		return err
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < extraTime {
+			extraCtx, cancel := context.WithTimeout(parentCtx, extraTime)
+			ctx = extraCtx
+			defer cancel()
+		}
 	}
 
 	err = s.updateJnSlc(ctx, journals, db, stats)
