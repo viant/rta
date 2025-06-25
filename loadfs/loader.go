@@ -37,20 +37,22 @@ type Service struct {
 }
 
 // Load loads data into the file system
-func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) (err error) {
-	logger, destURL, err := s.logger(options, batchID)
+func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
+	destURL := s.getURL(options, batchID)
+	if err := s.loadWithLogger(destURL, data); err != nil {
+		return err
+	}
+	return s.insertToJournalIfNeeded(ctx, destURL, batchID)
+}
+
+func (s *Service) loadWithLogger(URL string, data interface{}) error {
+	logger, err := s.logger(URL)
 	if err != nil {
 		return err
 	}
-
-	defer func() { err = errors.Join(err, logger.Close()) }()
 
 	err = s.load(data, logger)
-	if err != nil {
-		return err
-	}
-
-	err = s.insertToJournalIfNeeded(ctx, destURL, batchID)
+	errors.Join(err, logger.Close())
 
 	return err
 }
@@ -104,11 +106,7 @@ func (s *Service) load(data interface{}, logger *log.Logger) error {
 	return nil
 }
 
-func (s *Service) logger(options []loader.Option, batchID string) (*log.Logger, string, error) {
-	t := time.Now().UTC()
-	collectorInstanceId := loader.NewOptions(options...).GetInstanceId()
-	category := loader.NewOptions(options...).Category()
-	URL := s.format.expandURL(s.config.URL, &t, batchID, collectorInstanceId, s.format.hostIpInfo, category)
+func (s *Service) logger(URL string) (*log.Logger, error) {
 
 	aConfig := &tconfig.Stream{
 		FlushMod:     s.config.FlushMod,
@@ -118,10 +116,19 @@ func (s *Service) logger(options []loader.Option, batchID string) (*log.Logger, 
 
 	result, err := log.New(aConfig, "", afs.New())
 	if err != nil {
-		return nil, "", fmt.Errorf("rta fs loader: unable to create logger due to: %w", err)
+		return nil, fmt.Errorf("rta fs loader: unable to create logger due to: %w", err)
 	}
 
-	return result, URL, nil
+	return result, nil
+}
+
+func (s *Service) getURL(options []loader.Option, batchID string) string {
+	t := time.Now().UTC()
+	opts := loader.NewOptions(options...)
+	collectorInstanceId := opts.GetInstanceId()
+	category := opts.Category()
+	URL := s.format.expandURL(s.config.URL, &t, batchID, collectorInstanceId, s.format.hostIpInfo, category)
+	return URL
 }
 
 func (s *Service) loadEntry(record interface{}, logger *log.Logger) error {

@@ -6,10 +6,12 @@ type (
 	Options struct {
 		streamURLSymLinkTrg string
 		instanceId          string
-		pool                *FMapPool
+		fMapPool            *FMapPool
+		mapPool             *MapPool
 		keyPtrFn            func(record interface{}, ptr interface{})
 		fsLoader            loader2.Loader
 		category            string
+		shardAccPool        *ShardAccPool
 	}
 
 	Option func(o *Options)
@@ -23,9 +25,15 @@ func NewOptions(options ...Option) *Options {
 	return ret
 }
 
-func WithFastMapPool(pool *FMapPool) Option {
+func WithFastMapPool(fMapPool *FMapPool) Option {
 	return func(o *Options) {
-		o.pool = pool
+		o.fMapPool = fMapPool
+	}
+}
+
+func WithMapPool(mapPool *MapPool) Option {
+	return func(o *Options) {
+		o.mapPool = mapPool
 	}
 }
 
@@ -65,6 +73,12 @@ func (o *Options) Apply(opts ...Option) {
 	}
 	for _, opt := range opts {
 		opt(o)
+	}
+}
+
+func WithShardAccPool(shardAccPool *ShardAccPool) Option {
+	return func(o *Options) {
+		o.shardAccPool = shardAccPool
 	}
 }
 

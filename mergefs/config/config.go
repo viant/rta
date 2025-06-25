@@ -8,9 +8,11 @@ import (
 	cconfig "github.com/viant/rta/collector/config"
 	"github.com/viant/rta/config"
 	lconfig "github.com/viant/rta/load/config"
+	"github.com/viant/rta/shared"
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v3"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,6 +50,8 @@ type (
 		MaxJournalsInChunk int
 		ScannerBufferMB    int //use in case you see bufio.Scanner: token too long
 		GCPercent          int
+		ForceQuitTimeSec   int
+		CustomJnQuery      string // custom journal query, if not empty it will be used instead of default journal query
 	}
 
 	DestPlaceholders struct {
@@ -89,6 +93,11 @@ func (c *Config) init() error {
 	if c.GCPercent < 1 || c.GCPercent > 100 {
 		c.GCPercent = 100
 	}
+
+	if c.ForceQuitTimeSec < 1 {
+		c.ForceQuitTimeSec = 180
+	}
+
 	return nil
 }
 
@@ -250,6 +259,14 @@ func (c *Config) validateRequired(prefix string) error {
 		"DSN":    c.JournalConnection.Dsn,
 	}
 
+	if c.Endpoint == nil {
+		return fmt.Errorf("%s %s was nil", prefix, "Endpoint")
+	}
+
+	if c.Endpoint.Port == 0 {
+		return fmt.Errorf("%s %s equals 0", prefix, "Endpoint.Port")
+	}
+
 	for field, value := range required2 {
 		if value == "" {
 			return fmt.Errorf("%s %s was empty", prefix, field)
@@ -353,6 +370,8 @@ func (c *Config) ExpandConfig(name string, typeDef string) {
 	c.Dest = c.expandTableName(c.Dest, name)
 	c.CreateDDL = c.expandCreateDDL(c.CreateDDL, typeDef, c.Dest)
 
+	c.CustomJnQuery = c.expandCustomJnQuery(c.JournalTable, strconv.Itoa(shared.Active))
+
 	if c.Collector != nil {
 		c.Collector.Loader.Dest = c.expandTableName(c.Collector.Loader.Dest, name)
 		c.Collector.Loader.CreateDDL = c.expandCreateDDL(c.Collector.Loader.CreateDDL, typeDef, c.Collector.Loader.Dest)
@@ -378,4 +397,12 @@ func (c *Config) expandCreateDDL(template, typeDef, dest string) string {
 
 func getPrefix() string {
 	return fmt.Sprintf("%s config validation:", LogPrefix)
+}
+
+func (c *Config) expandCustomJnQuery(table, activeStatus string) string {
+	if c.CustomJnQuery == "" {
+		return ""
+	}
+	result := strings.ReplaceAll(c.CustomJnQuery, "${Src}", table)
+	return strings.ReplaceAll(result, "${ActiveStatus}", activeStatus)
 }

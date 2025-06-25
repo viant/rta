@@ -23,7 +23,7 @@ func (c *FMapPool) Put(aMap *swiss.Map[any, any]) {
 	c.pool.Put(aMap)
 }
 
-// NewFMapPool creates a new pool
+// NewFMapPool creates a new fMapPool
 func NewFMapPool(expectedSize int, allocSize int) *FMapPool {
 	ret := &FMapPool{
 		expectedSize: expectedSize,
@@ -40,4 +40,42 @@ func NewFMapPool(expectedSize int, allocSize int) *FMapPool {
 	}
 	ret.zeroData = make([]any, expectedSize)
 	return ret
+}
+
+// MapPool is a pool of ready-to-use maps.
+// It holds up to cap(p.pool) maps; excess returned maps are dropped.
+type MapPool struct {
+	pool        sync.Pool
+	mapInitSize int
+}
+
+// NewMapPool creates a new MapPool
+func NewMapPool(mapInitSize int) *MapPool {
+	ret := &MapPool{
+		mapInitSize: mapInitSize,
+	}
+
+	ret.pool = sync.Pool{
+		New: func() interface{} {
+			m := make(map[interface{}]interface{}, mapInitSize)
+			return m
+		},
+	}
+
+	return ret
+}
+
+// Get returns a map from the pool or allocates a fresh one if the pool is empty.
+func (p *MapPool) Get() map[interface{}]interface{} {
+	v := p.pool.Get()
+	aMap := v.(map[interface{}]interface{})
+	return aMap
+}
+
+// Put resets the map and returns it to the pool.
+func (p *MapPool) Put(aMap map[interface{}]interface{}) {
+	for k, _ := range aMap {
+		delete(aMap, k)
+	}
+	p.pool.Put(aMap)
 }

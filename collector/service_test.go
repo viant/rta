@@ -56,6 +56,24 @@ func BenchmarkService_FmapCollect(b *testing.B) {
 
 }
 
+func BenchmarkService_ShardAccCollect(b *testing.B) {
+
+	cfg := config.Config{
+		ID:             "test",
+		Loader:         &lconfig.Config{},
+		Stream:         &tconfig.Stream{},
+		StreamDisabled: true,
+		Batch: &config.Batch{
+			MaxElements:   10000,
+			MaxDurationMs: int(time.Minute.Milliseconds()),
+		},
+		UseShardAccumulator: true,
+	}
+
+	runBench(b, cfg)
+
+}
+
 func BenchmarkService_Collect(b *testing.B) {
 
 	cfg := config.Config{

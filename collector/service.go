@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/afs"
@@ -62,7 +61,10 @@ type Service struct {
 	randGenerator       *rand.Rand
 	loadCount           int
 	fastMapPool         *FMapPool
+	mapPool             *MapPool
 	category            string
+	useShardedAcc       bool
+	shardAccPool        *ShardAccPool
 }
 
 func (s *Service) NotifyWatcher() {
@@ -184,6 +186,13 @@ func (s *Service) getBatch() (*Batch, error) {
 	if s.fastMapPool != nil {
 		s.options = append(s.options, WithFastMapPool(s.fastMapPool))
 	}
+	if s.mapPool != nil {
+		s.options = append(s.options, WithMapPool(s.mapPool))
+	}
+	if s.shardAccPool != nil {
+		s.options = append(s.options, WithShardAccPool(s.shardAccPool))
+	}
+
 	batch, err := NewBatch(s.config.Stream, s.config.StreamDisabled, s.fs, s.options...)
 	if err != nil {
 		return nil, err
@@ -204,6 +213,9 @@ func (s *Service) ID() string {
 }
 
 func (s *Service) Collect(record interface{}) error {
+	if record == nil {
+		return fmt.Errorf("collector.Collect: record is nil")
+	}
 	return s.CollectAll(record)
 }
 
@@ -350,13 +362,14 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 	flushLog := ""
 
 	// prevent load when batch is empty, csv writer will return error in that case and file will never be deleted
-	if batch.Accumulator.Len() != 0 {
+	batchLen := batch.Accumulator.Len()
+	if batchLen != 0 {
 		data := s.mapperFn(batch.Accumulator)
 		startPrimary := time.Now()
 		var err error
 		if primarySubLog, err = s.load(context.Background(), data, batch.ID); err != nil {
 			atomic.StoreUint32(&batch.flushStarted, 0)
-			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, err)
+			err2 := fmt.Errorf("load error (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s) due to: %w", s.instanceId, s.category, batchLen, batch.ID, err)
 			stats.Append(err2)
 			return "", err2
 		}
@@ -368,7 +381,7 @@ func (s *Service) Flush(batch *Batch) (string, error) {
 			err, retries := s.retryFsLoadIfNeeded(batch.ID, err, ctx, data)
 			if err != nil {
 				err2 := fmt.Errorf("flush warning: failed to fs load (collector [instance: %s, category: %s], rows cnt: %d, batch id: %s%s) due to: %w",
-					s.instanceId, s.category, batch.Accumulator.Len(), batch.ID, retries, err)
+					s.instanceId, s.category, batchLen, batch.ID, retries, err)
 				log.Println(err2.Error())
 				stats.Append(err2)
 			}
@@ -420,6 +433,20 @@ func (s *Service) closeBatch(ctx context.Context, batch *Batch) error {
 	if acc.FastMap != nil {
 		s.fastMapPool.Put(acc.FastMap)
 	}
+
+	if acc.Map != nil {
+		if s.mapPool != nil {
+			s.mapPool.Put(acc.Map)
+		}
+		acc.Map = make(map[interface{}]interface{})
+	}
+
+	if s.useShardedAcc && acc.ShardedAccumulator != nil {
+		s.shardAccPool.Put(acc.ShardedAccumulator)
+		acc = nil
+		batch = nil
+	}
+
 	return err
 }
 
@@ -456,7 +483,7 @@ func (s *Service) replayBatch(ctx context.Context, URL string, symLinkStreamURLT
 	scanner := bufio.NewScanner(reader)
 	processed := 0
 	failed := 0
-	acc := NewAccumulator(s.fastMapPool)
+	acc := NewAccumulator(s.fastMapPool, s.mapPool, s.shardAccPool)
 	for scanner.Scan() {
 		processed++
 		data := scanner.Bytes()
@@ -588,6 +615,24 @@ func New(cfg *config.Config,
 	if cfg.UseFastMap {
 		srv.fastMapPool = NewFMapPool(max(100, cfg.FastMapSize), 2)
 	}
+
+	if cfg.UseShardAccumulator {
+		srv.useShardedAcc = cfg.UseShardAccumulator
+		if cfg.ShardCnt <= 0 {
+			cfg.ShardCnt = 10
+		}
+
+		if cfg.ShardMapSize <= 0 {
+			cfg.ShardMapSize = 10
+		}
+
+		srv.shardAccPool = NewShardAccPool(cfg.ShardMapSize, cfg.ShardCnt)
+	}
+
+	if cfg.MapPoolCfg != nil {
+		srv.mapPool = NewMapPool(cfg.MapPoolCfg.MapInitSize)
+	}
+
 	if cfg.LoadDelayMaxMs > 0 {
 		seed := time.Now().UnixNano() + int64(cfg.LoadDelaySeedPart)
 		srv.randGenerator = rand.New(rand.NewSource(seed))
@@ -642,19 +687,19 @@ func (s *Service) IsUp() bool {
 
 func (s *Service) FlushOnDemand(ctx context.Context, batch *Batch, cnt int, startFlushScheduledBatches *time.Time) error {
 	elapsedMergeBatch := time.Now().Sub(*startFlushScheduledBatches)
+	batchCnt := batch.Accumulator.Len()
 	flushSubLog, err := s.Flush(batch)
 	elapsedTotal := time.Now().Sub(*startFlushScheduledBatches)
 	if err == nil && s.config.Debug {
 		fmt.Printf("successfully flushed %s rows:%d, batchCnt:%d, total:%v, merge:%v, %v, %v\n",
 			s.instanceId,
-			batch.Accumulator.Len(), cnt,
+			batchCnt, cnt,
 			elapsedTotal, elapsedMergeBatch,
 			flushSubLog,
 			batch.ID)
 	}
 
-	err2 := s.closeBatch(ctx, batch)
-	return errors.Join(err, err2)
+	return err
 }
 
 func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err error) {
@@ -696,6 +741,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 	}
 	elapsedMergeBatch := time.Now().Sub(startMergeBatch)
 
+	masterCnt := masterBatch.Accumulator.Len()
 	flushSubLog, err := s.Flush(masterBatch)
 
 	elapsedTotal := time.Now().Sub(startFlushScheduledBatches)
@@ -706,7 +752,7 @@ func (s *Service) flushScheduledBatches(ctx context.Context) (flushed bool, err 
 		if s.config.Debug {
 			fmt.Printf("successfully flushed [%s, %s] rows:%d, batchCnt:%d, total:%v, merge:%v, %v, %v\n",
 				s.instanceId, s.category,
-				masterBatch.Accumulator.Len(), len(batchesToFlushNow),
+				masterCnt, len(batchesToFlushNow),
 				elapsedTotal, elapsedMergeBatch,
 				flushSubLog,
 				masterBatch.ID)
@@ -782,7 +828,15 @@ func (s *Service) watchActiveBatch() {
 
 func (s *Service) mergeBatches(ctx context.Context, dest *Batch, from *Batch) error {
 	var items []interface{}
-	if from.Accumulator.UseFastMap {
+	if from.Accumulator.UseShardedAcc {
+		items = make([]interface{}, 0, from.Accumulator.ShardedAccumulator.Len())
+		for _, sh := range from.Accumulator.ShardedAccumulator.Shards {
+			sh.FastMap.Iter(func(k any, value any) (stop bool) {
+				items = append(items, value)
+				return false
+			})
+		}
+	} else if from.Accumulator.UseFastMap {
 		items = make([]interface{}, 0, from.Accumulator.FastMap.Count())
 		from.Accumulator.FastMap.Iter(func(k any, value any) (stop bool) {
 			items = append(items, value)
