@@ -181,6 +181,9 @@ func (m *MultiMerger) initJnConnection() error {
 
 	cfg := m.config.JournalConnection
 	m.dbJn, err = cfg.OpenDB(context.Background())
+	if err != nil {
+		return fmt.Errorf("%s failed to open journal connection: %w", logPrefix, err)
+	}
 
 	if cfg.MaxOpenConns > 0 {
 		m.dbJn.SetMaxOpenConns(cfg.MaxOpenConns)
