@@ -2,21 +2,21 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/viant/rta/config"
 	"github.com/viant/rta/shared"
 )
 
 // Config represents a file system loader configuration
 type Config struct {
-	URL                 string
-	FlushMod            int
-	StreamUpload        bool
-	MaxMessageSize      int
-	Concurrency         int
-	ConnectionJn        *config.Connection
-	JournalTable        string
-	CreateJnDDL         string
-	MetaSessionCacheKey string
+	URL            string
+	FlushMod       int
+	StreamUpload   bool
+	MaxMessageSize int
+	Concurrency    int
+	ConnectionJn   *config.Connection
+	JournalTable   string
+	CreateJnDDL    string
 }
 
 // Validate checks if the configuration is valid
