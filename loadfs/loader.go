@@ -5,6 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/viant/afs"
 	"github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/domain"
@@ -12,28 +17,26 @@ import (
 	"github.com/viant/rta/shared"
 	"github.com/viant/sqlx/io/insert"
 	"github.com/viant/sqlx/metadata/info/dialect"
+	"github.com/viant/sqlx/option"
 	tconfig "github.com/viant/tapper/config"
 	"github.com/viant/tapper/io"
 	"github.com/viant/tapper/io/encoder"
 	"github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
 	tjson "github.com/viant/tapper/msg/json"
-	"reflect"
-	"strings"
-	"sync"
-	"time"
 )
 
 // Service represents a file system loader service
 type Service struct {
-	config      *config.Config
-	hostIP      string
-	fs          afs.Service
-	format      Format
-	msgProvider *msg.Provider
-	mux         sync.RWMutex
-	encProvider *encoder.Provider
-	wrapFn      func(record interface{}, wrapper interface{}) (interface{}, error)
+	config           *config.Config
+	hostIP           string
+	fs               afs.Service
+	format           Format
+	msgProvider      *msg.Provider
+	mux              sync.RWMutex
+	encProvider      *encoder.Provider
+	wrapFn           func(record interface{}, wrapper interface{}) (interface{}, error)
+	metaSessionCache *sync.Map
 }
 
 // Load loads data into the file system
@@ -62,13 +65,13 @@ func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, b
 		return nil
 	}
 
-	dbJn, err := s.config.ConnectionJn.OpenDB(ctx)
+	dbJn, hashMetaSessionCacheKey, err := s.config.ConnectionJn.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, dbJn.Close()) }()
 
-	err = s.insertToJournal(ctx, dbJn, destURL, batchID)
+	err = s.insertToJournal(ctx, dbJn, destURL, batchID, hashMetaSessionCacheKey)
 	if err != nil {
 		return fmt.Errorf("failed to insert into journal table %s due to: %w", s.config.JournalTable, err)
 	}
@@ -182,9 +185,10 @@ func New(cfg *config.Config, options ...loader.Option) (*Service, error) {
 	}
 
 	srv := &Service{
-		config: cfg,
-		format: Format{},
-		wrapFn: opts.GetWrapFunc(),
+		config:           cfg,
+		format:           Format{},
+		wrapFn:           opts.GetWrapFunc(),
+		metaSessionCache: &sync.Map{},
 	}
 
 	err = srv.init()
@@ -221,7 +225,7 @@ func (s *Service) ensureJnTableIfNeeded() (err error) {
 	}
 
 	ctx := context.Background()
-	dbJn, err := s.config.ConnectionJn.OpenDB(ctx)
+	dbJn, _, err := s.config.ConnectionJn.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
@@ -235,9 +239,9 @@ func (s *Service) ensureJnTableIfNeeded() (err error) {
 	return err
 }
 
-func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL string, batchID string) error {
+func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, destURL string, batchID string, metaSessionCacheKey string) error {
 	jnTable := s.config.JournalTable
-	inserter, err := insert.New(ctx, db, jnTable)
+	inserter, err := insert.New(ctx, db, jnTable, option.MetaSessionCacheKey(metaSessionCacheKey), option.WithMetaSessionCache(s.metaSessionCache))
 	if err != nil {
 		return err
 	}

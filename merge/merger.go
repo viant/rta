@@ -59,7 +59,7 @@ func (s *Service) Merge(ctx context.Context) error {
 	defer func() {
 		onDone(time.Now(), stats)
 	}()
-	db, err := s.config.Connection.OpenDB(ctx)
+	db, _, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
 		stats.Append(err)
 		return err

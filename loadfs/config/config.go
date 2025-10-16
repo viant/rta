@@ -8,14 +8,15 @@ import (
 
 // Config represents a file system loader configuration
 type Config struct {
-	URL            string
-	FlushMod       int
-	StreamUpload   bool
-	MaxMessageSize int
-	Concurrency    int
-	ConnectionJn   *config.Connection
-	JournalTable   string
-	CreateJnDDL    string
+	URL                 string
+	FlushMod            int
+	StreamUpload        bool
+	MaxMessageSize      int
+	Concurrency         int
+	ConnectionJn        *config.Connection
+	JournalTable        string
+	CreateJnDDL         string
+	MetaSessionCacheKey string
 }
 
 // Validate checks if the configuration is valid

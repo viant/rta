@@ -4,6 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/domain"
 	"github.com/viant/rta/load/config"
@@ -15,15 +19,14 @@ import (
 	"github.com/viant/sqlx/metadata/info/dialect"
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/option"
-	"strings"
-	"time"
 )
 
 type Service struct {
-	config       *config.Config
-	hostIP       string
-	suffixHostIp string
-	suffix       config.Suffix
+	config           *config.Config
+	hostIP           string
+	suffixHostIp     string
+	suffix           config.Suffix
+	metaSessionCache *sync.Map
 }
 
 func (s *Service) Load(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
@@ -36,13 +39,13 @@ func (s *Service) Load(ctx context.Context, data interface{}, batchID string, op
 }
 
 func (s *Service) loadIndirect(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
-	db, err := s.config.Connection.OpenDB(ctx)
+	db, metaSessionCacheKey, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	collectorId := loader.NewOptions(options...).GetInstanceId()
-	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID, collectorId)
+	recordExist, tempTable, err := s.loadToTempTable(ctx, data, db, batchID, collectorId, metaSessionCacheKey)
 	if err != nil {
 		return err
 	}
@@ -54,7 +57,7 @@ func (s *Service) loadIndirect(ctx context.Context, data interface{}, batchID st
 	if err != nil {
 		return err
 	}
-	err = s.insertToJournal(ctx, db, tempTable, tx, batchID)
+	err = s.insertToJournal(ctx, db, tempTable, tx, batchID, metaSessionCacheKey)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("failed to insert into journal table: %w", err)
@@ -92,7 +95,7 @@ func (s *Service) checkRecordExistInJounral(ctx context.Context, db *sql.DB, bat
 	return count > 0, err
 }
 
-func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string, collectorId string) (bool, string, error) {
+func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql.DB, batchID string, collectorId string, metaSessionCacheKey string) (bool, string, error) {
 	exist, err := s.checkRecordExistInJounral(ctx, db, batchID)
 	if err != nil {
 		return false, "", err
@@ -124,7 +127,7 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 			return false, "", fmt.Errorf("failed to truncate: %v, %w", sourceTable, err)
 		}
 	}
-	loadFn, err := s.loadFn(ctx, db, sourceTable)
+	loadFn, err := s.loadFn(ctx, db, sourceTable, metaSessionCacheKey)
 	if err != nil {
 		return false, "", fmt.Errorf("filed to get load fn for %v, %w", sourceTable, err)
 	}
@@ -135,9 +138,9 @@ func (s *Service) loadToTempTable(ctx context.Context, data interface{}, db *sql
 	return false, sourceTable, err
 }
 
-func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (Load, error) {
+func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string, metaSessionCacheKey string) (Load, error) {
 	if s.config.UseInsertAPI {
-		srv, err := insert.New(ctx, db, sourceTable)
+		srv, err := insert.New(ctx, db, sourceTable, option.MetaSessionCacheKey(metaSessionCacheKey), option.WithMetaSessionCache(s.metaSessionCache))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create insert service: %w", err)
 		}
@@ -157,9 +160,9 @@ func (s *Service) loadFn(ctx context.Context, db *sql.DB, sourceTable string) (L
 	}, nil
 }
 
-func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable string, tx *sql.Tx, batchID string) error {
+func (s *Service) insertToJournal(ctx context.Context, db *sql.DB, tempTable string, tx *sql.Tx, batchID string, metaSessionCacheKey string) error {
 	jnTable := s.config.JournalTable
-	insert, err := insert.New(ctx, db, jnTable)
+	insert, err := insert.New(ctx, db, jnTable, option.MetaSessionCacheKey(metaSessionCacheKey), option.WithMetaSessionCache(s.metaSessionCache))
 	if err != nil {
 		return err
 	}
@@ -196,7 +199,7 @@ func New(c *config.Config, suffix config.Suffix) (*Service, error) {
 	if suffix != nil {
 		c.SetSuffix(suffix)
 	}
-	srv := &Service{config: c}
+	srv := &Service{config: c, metaSessionCache: &sync.Map{}}
 	return srv, srv.init()
 
 }
