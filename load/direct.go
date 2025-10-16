@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/viant/rta/collector/loader"
 	"github.com/viant/rta/domain"
 	"github.com/viant/rta/shared"
@@ -15,12 +18,10 @@ import (
 	"github.com/viant/sqlx/metadata/info/dialect"
 	_ "github.com/viant/sqlx/metadata/product/mysql/load"
 	"github.com/viant/sqlx/option"
-	"strings"
-	"time"
 )
 
 func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID string, options ...loader.Option) error {
-	db, hashMetaSessionCacheKey, err := s.config.Connection.OpenDB(ctx)
+	db, metaSessionCacheKey, err := s.config.Connection.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
@@ -28,7 +29,7 @@ func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID stri
 
 	var dbJn *sql.DB
 	if s.config.ConnectionJn != nil {
-		dbJn, hashMetaSessionCacheKey, err = s.config.ConnectionJn.OpenDB(ctx)
+		dbJn, metaSessionCacheKey, err = s.config.ConnectionJn.OpenDB(ctx)
 		if err != nil {
 			return err
 		}
@@ -36,7 +37,7 @@ func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID stri
 	}
 
 	collectorId := loader.NewOptions(options...).GetInstanceId()
-	recordExist, tempTable, err := s.loadDirectToTable(ctx, data, db, dbJn, batchID, collectorId, hashMetaSessionCacheKey)
+	recordExist, tempTable, err := s.loadDirectToTable(ctx, data, db, dbJn, batchID, collectorId, metaSessionCacheKey)
 	if err != nil {
 		return err
 	}
@@ -52,7 +53,7 @@ func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID stri
 		if err != nil {
 			return err
 		}
-		err = s.insertToJournalDirect(ctx, dbJn, tempTable, tx, batchID, hashMetaSessionCacheKey)
+		err = s.insertToJournalDirect(ctx, dbJn, tempTable, tx, batchID, metaSessionCacheKey)
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to insert into journal table: %w", err)
@@ -88,7 +89,7 @@ func (s *Service) checkRecordExistInJounralDirect(ctx context.Context, db *sql.D
 	return count > 0, err
 }
 
-func (s *Service) loadDirectToTable(ctx context.Context, data interface{}, db *sql.DB, dbJn *sql.DB, batchID string, collectorId string, hashMetaSessionCacheKey string) (bool, string, error) {
+func (s *Service) loadDirectToTable(ctx context.Context, data interface{}, db *sql.DB, dbJn *sql.DB, batchID string, collectorId string, metaSessionCacheKey string) (bool, string, error) {
 	var err error
 
 	if dbJn != nil && s.config.JournalTable != "" {
@@ -111,7 +112,7 @@ func (s *Service) loadDirectToTable(ctx context.Context, data interface{}, db *s
 		return false, "", err
 	}
 
-	loadFnDirect, err := s.loadFnDirect(ctx, db, sourceTable, hashMetaSessionCacheKey)
+	loadFnDirect, err := s.loadFnDirect(ctx, db, sourceTable, metaSessionCacheKey)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to get load fn for %v, %w", sourceTable, err)
 	}

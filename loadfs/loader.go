@@ -65,13 +65,13 @@ func (s *Service) insertToJournalIfNeeded(ctx context.Context, destURL string, b
 		return nil
 	}
 
-	dbJn, hashMetaSessionCacheKey, err := s.config.ConnectionJn.OpenDB(ctx)
+	dbJn, metaSessionCacheKey, err := s.config.ConnectionJn.OpenDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, dbJn.Close()) }()
 
-	err = s.insertToJournal(ctx, dbJn, destURL, batchID, hashMetaSessionCacheKey)
+	err = s.insertToJournal(ctx, dbJn, destURL, batchID, metaSessionCacheKey)
 	if err != nil {
 		return fmt.Errorf("failed to insert into journal table %s due to: %w", s.config.JournalTable, err)
 	}
