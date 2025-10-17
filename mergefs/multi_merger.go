@@ -5,6 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	"github.com/viant/gmetric/provider"
@@ -23,14 +32,6 @@ import (
 	"github.com/viant/sqlx/metadata/database"
 	"github.com/viant/x"
 	"github.com/viant/xreflect"
-	"log"
-	"net/http"
-	"os"
-	"reflect"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 const (
@@ -180,7 +181,7 @@ func (m *MultiMerger) initJnConnection() error {
 	var err error
 
 	cfg := m.config.JournalConnection
-	m.dbJn, err = cfg.OpenDB(context.Background())
+	m.dbJn, _, err = cfg.OpenDB(context.Background())
 	if err != nil {
 		return fmt.Errorf("%s failed to open journal connection: %w", logPrefix, err)
 	}
@@ -354,7 +355,7 @@ func ensureLoaderConfig(c *config.Config) (lConfig *lconfig.Config, err error) {
 }
 
 func detectProduct(ctx context.Context, conn *rconfig.Connection) (product *database.Product, err error) {
-	db, err := conn.OpenDB(ctx)
+	db, _, err := conn.OpenDB(ctx)
 	if err != nil {
 		return nil, err
 	}

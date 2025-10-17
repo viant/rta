@@ -26,10 +26,9 @@ func (s *Service) loadDirect(ctx context.Context, data interface{}, batchID stri
 		return err
 	}
 	defer db.Close()
-
 	var dbJn *sql.DB
 	if s.config.ConnectionJn != nil {
-		dbJn, metaSessionCacheKey, err = s.config.ConnectionJn.OpenDB(ctx)
+		dbJn, _, err = s.config.ConnectionJn.OpenDB(ctx)
 		if err != nil {
 			return err
 		}

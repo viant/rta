@@ -3,10 +3,11 @@ package mergefs
 import (
 	"context"
 	"errors"
+	"sort"
+
 	rconfig "github.com/viant/rta/config"
 	"github.com/viant/rta/mergefs/config"
 	"github.com/viant/sqlx/io/read"
-	"sort"
 )
 
 type Placeholder struct {
@@ -39,7 +40,7 @@ func ensurePlaceholdersIfNeeded(c *config.Config) ([]string, error) {
 
 func readPlaceholders(conn *rconfig.Connection, query string) (result []string, err error) {
 	ctx := context.Background()
-	db, err := conn.OpenDB(ctx)
+	db, _, err := conn.OpenDB(ctx)
 	if err != nil {
 		return nil, err
 	}
